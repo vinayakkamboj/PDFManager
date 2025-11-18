@@ -4,12 +4,8 @@ import PDFSidebar from "@/components/PDFSidebar";
 import PDFViewer, { PDFViewerHandle } from "@/components/PDFViewer";
 
 const Explore = () => {
-  // Annotations wrapper objects: { sdk, pageIndex, boundingBox, type, clientId }
   const [annotations, setAnnotations] = useState<any[]>([]);
-  
-  // Signature fields: { id, sdk, name, pageIndex, boundingBox, isSigned, widget }
   const [signatureFields, setSignatureFields] = useState<any[]>([]);
-  
   const [fileName, setFileName] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [currentAnnotationIndex, setCurrentAnnotationIndex] = useState(0);
@@ -120,6 +116,7 @@ const Explore = () => {
         await viewerRef.current.focusSignatureField(field);
       }
     } catch (err) {
+      console.warn("Failed to focus signature field:", err);
       if (viewerRef.current) viewerRef.current.navigateToPage(field.pageIndex ?? 0);
     }
   };
@@ -153,15 +150,12 @@ const Explore = () => {
     }
   };
 
-  // NEW: Handler to add signature field
   const handleAddSignatureField = async () => {
     if (!viewerRef.current) return;
     try {
       await viewerRef.current.addSignatureField();
-      // The signature fields list will be automatically refreshed via form field events
     } catch (err) {
       console.error("Failed to add signature field:", err);
-      // Error is already handled in PDFViewer with user-friendly alert
     }
   };
 
@@ -196,6 +190,45 @@ const Explore = () => {
     }
   };
 
+  // NEW: Delete signature field handler
+  const handleDeleteSignatureField = async (field: any, index: number) => {
+    if (!viewerRef.current) return;
+
+    // Optimistically remove from local list for snappy UX
+    setSignatureFields((prev) => {
+      const keyToMatch = field.id ?? field.name;
+      const newArr = prev.filter((f) => (f.id ?? f.name) !== keyToMatch);
+      
+      // Adjust current index if needed
+      setCurrentSignatureFieldIndex((ci) => {
+        if (newArr.length === 0) return 0;
+        if (ci >= newArr.length) return Math.max(0, newArr.length - 1);
+        return ci;
+      });
+      
+      return newArr;
+    });
+
+    try {
+      await viewerRef.current.deleteSignatureField(field);
+      console.log("Signature field deleted successfully");
+    } catch (err) {
+      console.error("Failed to delete signature field:", err);
+      
+      // On error, try to refresh the signature fields list to get back in sync
+      try {
+        const instance = viewerRef.current.getInstance?.();
+        if (instance) {
+          // Trigger a small action to force event propagation
+          const pageIndex = field.pageIndex ?? 0;
+          viewerRef.current?.navigateToPage(pageIndex);
+        }
+      } catch (e) {
+        console.warn("Failed to refresh after delete error:", e);
+      }
+    }
+  };
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)]">
       <PDFSidebar
@@ -213,6 +246,7 @@ const Explore = () => {
         onSignatureFieldSelect={handleSignatureFieldSelect}
         onNextSignatureField={handleNextSignatureField}
         onPreviousSignatureField={handlePreviousSignatureField}
+        onDeleteSignatureField={handleDeleteSignatureField}
         currentAnnotationIndex={currentAnnotationIndex}
         currentSignatureFieldIndex={currentSignatureFieldIndex}
       />

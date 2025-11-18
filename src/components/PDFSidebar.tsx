@@ -26,7 +26,7 @@ interface PDFSidebarProps {
   isLoading: boolean;
   onFileUpload: (file: File) => void;
   onToggleDraw: () => void;
-  onAddSignatureField: () => void; // NEW prop
+  onAddSignatureField: () => void;
   onAnnotationSelect: (annotationWrapper: any, index: number) => void;
   onNextAnnotation: () => void;
   onPreviousAnnotation: () => void;
@@ -34,6 +34,7 @@ interface PDFSidebarProps {
   onSignatureFieldSelect: (signatureField: any, index: number) => void;
   onNextSignatureField: () => void;
   onPreviousSignatureField: () => void;
+  onDeleteSignatureField: (signatureField: any, index: number) => void;
   currentAnnotationIndex: number;
   currentSignatureFieldIndex: number;
 }
@@ -53,6 +54,7 @@ const PDFSidebar = ({
   onSignatureFieldSelect,
   onNextSignatureField,
   onPreviousSignatureField,
+  onDeleteSignatureField,
   currentAnnotationIndex,
   currentSignatureFieldIndex,
 }: PDFSidebarProps) => {
@@ -76,6 +78,14 @@ const PDFSidebar = ({
       onDeleteAnnotation?.(wrapper, index);
     } catch (e) {
       console.error("onDeleteAnnotation handler threw:", e);
+    }
+  };
+
+  const handleDeleteSignatureFieldClick = (field: any, index: number) => {
+    try {
+      onDeleteSignatureField?.(field, index);
+    } catch (e) {
+      console.error("onDeleteSignatureField handler threw:", e);
     }
   };
 
@@ -219,25 +229,26 @@ const PDFSidebar = ({
           <>
             {/* Draw button */}
             <div className="p-4 shrink-0">
-              <div className="flex items-center justify-between">
-                {!isCollapsed ? (
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Draw</h3>
-                ) : null}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size={isCollapsed ? "icon" : "default"}
-                      onClick={onToggleDraw}
-                      className={cn("hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", !isCollapsed && "w-full")}
-                    >
-                      <Edit2 className="h-4 w-4" />
-                      {!isCollapsed && <span className="ml-2">Click to Draw</span>}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Open drawing tools</TooltipContent>
-                </Tooltip>
-              </div>
+              {!isCollapsed && (
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Draw</h3>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size={isCollapsed ? "icon" : "default"}
+                    onClick={onToggleDraw}
+                    className={cn(
+                      "hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", 
+                      !isCollapsed && "w-full justify-start"
+                    )}
+                  >
+                    <Edit2 className="h-4 w-4" />
+                    {!isCollapsed && <span className="ml-2">Click to Draw</span>}
+                  </Button>
+                </TooltipTrigger>
+                {isCollapsed && <TooltipContent side="right">Open drawing tools</TooltipContent>}
+              </Tooltip>
             </div>
 
             <Separator />
@@ -369,27 +380,28 @@ const PDFSidebar = ({
           </>
         ) : (
           <>
-            {/* Add Signature Field button - NEW */}
+            {/* Add Signature Field button */}
             <div className="p-4 shrink-0">
-              <div className="flex items-center justify-between">
-                {!isCollapsed ? (
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Add Field</h3>
-                ) : null}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size={isCollapsed ? "icon" : "default"}
-                      onClick={onAddSignatureField}
-                      className={cn("hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", !isCollapsed && "w-full")}
-                    >
-                      <Plus className="h-4 w-4" />
-                      {!isCollapsed && <span className="ml-2">Add Signature Field</span>}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Add a signature field to the PDF</TooltipContent>
-                </Tooltip>
-              </div>
+              {!isCollapsed && (
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Add Field</h3>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size={isCollapsed ? "icon" : "default"}
+                    onClick={onAddSignatureField}
+                    className={cn(
+                      "hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", 
+                      !isCollapsed && "w-full justify-start"
+                    )}
+                  >
+                    <Plus className="h-4 w-4" />
+                    {!isCollapsed && <span className="ml-2">Add Signature Field</span>}
+                  </Button>
+                </TooltipTrigger>
+                {isCollapsed && <TooltipContent side="right">Add a signature field to the PDF</TooltipContent>}
+              </Tooltip>
             </div>
 
             <Separator />
@@ -432,6 +444,25 @@ const PDFSidebar = ({
                                 >
                                   {isSigned ? "Signed" : "Unsigned"}
                                 </Badge>
+                              </div>
+
+                              <div className="ml-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteSignatureFieldClick(field, index);
+                                      }}
+                                      aria-label={`Delete signature field ${index + 1}`}
+                                      className="inline-flex items-center justify-center h-6 w-6 rounded hover:bg-destructive/10"
+                                      title="Delete signature field"
+                                    >
+                                      <X className="h-4 w-4 text-destructive" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="left">Delete</TooltipContent>
+                                </Tooltip>
                               </div>
                             </div>
 
