@@ -4,11 +4,16 @@ import PDFSidebar from "@/components/PDFSidebar";
 import PDFViewer, { PDFViewerHandle } from "@/components/PDFViewer";
 
 const Explore = () => {
-  // annotations are wrapper objects: { sdk, pageIndex, boundingBox, type, clientId }
+  // Annotations wrapper objects: { sdk, pageIndex, boundingBox, type, clientId }
   const [annotations, setAnnotations] = useState<any[]>([]);
+  
+  // Signature fields: { id, sdk, name, pageIndex, boundingBox, isSigned, widget }
+  const [signatureFields, setSignatureFields] = useState<any[]>([]);
+  
   const [fileName, setFileName] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [currentAnnotationIndex, setCurrentAnnotationIndex] = useState(0);
+  const [currentSignatureFieldIndex, setCurrentSignatureFieldIndex] = useState(0);
   const viewerRef = useRef<PDFViewerHandle>(null);
   const [currentMode, setCurrentMode] = useState<string>("");
 
@@ -18,6 +23,7 @@ const Explore = () => {
       setIsLoading(true);
       await viewerRef.current.loadDocument(file);
       setCurrentAnnotationIndex(0);
+      setCurrentSignatureFieldIndex(0);
     } catch (err) {
       console.error("loadDocument failed:", err);
       alert("Failed to load PDF. Try another file.");
@@ -31,8 +37,10 @@ const Explore = () => {
       setIsLoading(true);
       if (viewerRef.current) await viewerRef.current.unloadDocument();
       setAnnotations([]);
+      setSignatureFields([]);
       setFileName("");
       setCurrentAnnotationIndex(0);
+      setCurrentSignatureFieldIndex(0);
     } catch (err) {
       console.warn("clear failed:", err);
     } finally {
@@ -40,15 +48,17 @@ const Explore = () => {
     }
   };
 
-  // viewer provides already-filtered wrappers via onAnnotationsLoad
   const handleAnnotationsLoad = (loadedWrappers: any[]) => {
-    // loadedWrappers are authoritative; update state
     setAnnotations(loadedWrappers ?? []);
+  };
+
+  const handleSignatureFieldsLoad = (loadedFields: any[]) => {
+    setSignatureFields(loadedFields ?? []);
   };
 
   const handleDocumentLoad = (name: string) => setFileName(name);
 
-  // Keep index in bounds when annotations change
+  // Keep annotation index in bounds
   useEffect(() => {
     if (annotations.length === 0) {
       setCurrentAnnotationIndex(0);
@@ -59,6 +69,18 @@ const Explore = () => {
     }
   }, [annotations, currentAnnotationIndex]);
 
+  // Keep signature field index in bounds
+  useEffect(() => {
+    if (signatureFields.length === 0) {
+      setCurrentSignatureFieldIndex(0);
+      return;
+    }
+    if (currentSignatureFieldIndex >= signatureFields.length) {
+      setCurrentSignatureFieldIndex(0);
+    }
+  }, [signatureFields, currentSignatureFieldIndex]);
+
+  // Annotation navigation functions
   const focusAnnotationAtIndex = async (index: number) => {
     const wrapper = annotations[index];
     if (!wrapper) return;
@@ -88,7 +110,38 @@ const Explore = () => {
     focusAnnotationAtIndex(prev);
   };
 
-  // Single draw button handler (only ink mode)
+  // Signature field navigation functions
+  const focusSignatureFieldAtIndex = async (index: number) => {
+    const field = signatureFields[index];
+    if (!field) return;
+    setCurrentSignatureFieldIndex(index);
+    try {
+      if (viewerRef.current) {
+        await viewerRef.current.focusSignatureField(field);
+      }
+    } catch (err) {
+      if (viewerRef.current) viewerRef.current.navigateToPage(field.pageIndex ?? 0);
+    }
+  };
+
+  const handleSignatureFieldSelect = (_field: any, index: number) => {
+    focusSignatureFieldAtIndex(index);
+  };
+
+  const handleNextSignatureField = () => {
+    if (signatureFields.length === 0) return;
+    const next = (currentSignatureFieldIndex + 1) % signatureFields.length;
+    focusSignatureFieldAtIndex(next);
+  };
+
+  const handlePreviousSignatureField = () => {
+    if (signatureFields.length === 0) return;
+    const prev = currentSignatureFieldIndex === 0 
+      ? signatureFields.length - 1 
+      : currentSignatureFieldIndex - 1;
+    focusSignatureFieldAtIndex(prev);
+  };
+
   const handleToggleDraw = async () => {
     if (!viewerRef.current) return;
     try {
@@ -100,12 +153,18 @@ const Explore = () => {
     }
   };
 
-  /**
-   * Delete handler - called from the sidebar.
-   * - Calls Nutrient instance.delete(annotation) to remove from the viewer.
-   * - Optimistically removes the annotation from local state so the UI updates immediately.
-   * - The viewer emits annotation delete events which will drive authoritative updates via onAnnotationsLoad.
-   */
+  // NEW: Handler to add signature field
+  const handleAddSignatureField = async () => {
+    if (!viewerRef.current) return;
+    try {
+      await viewerRef.current.addSignatureField();
+      // The signature fields list will be automatically refreshed via form field events
+    } catch (err) {
+      console.error("Failed to add signature field:", err);
+      // Error is already handled in PDFViewer with user-friendly alert
+    }
+  };
+
   const handleDeleteAnnotation = async (wrapper: any, index: number) => {
     if (!viewerRef.current) return;
     const instance = viewerRef.current.getInstance?.();
@@ -114,11 +173,10 @@ const Explore = () => {
       return;
     }
 
-    // Optimistically remove from local list for snappy UX
+    // Optimistically remove from local list
     setAnnotations((prev) => {
       const keyToMatch = wrapper.clientId ?? wrapper.sdk?.id;
       const newArr = prev.filter((w) => (w.clientId ?? w.sdk?.id) !== keyToMatch);
-      // fix current index if needed
       setCurrentAnnotationIndex((ci) => {
         if (newArr.length === 0) return 0;
         if (ci >= newArr.length) return Math.max(0, newArr.length - 1);
@@ -128,16 +186,9 @@ const Explore = () => {
     });
 
     try {
-      // Nutrient SDK delete API: instance.delete(annotationOrId)
-      // Pass the sdk object (or id) from the wrapper
       await instance.delete?.(wrapper.sdk ?? wrapper.sdk?.id ?? wrapper.clientId);
-      // The viewer should emit an "annotations.delete" event and PDFViewer will re-collect annotations.
-      // If for some reason the SDK does not emit, the optimistic update above keeps UI consistent.
     } catch (err) {
       console.error("Failed to delete annotation via Nutrient instance:", err);
-      // On failure, we should re-sync authoritative annotations:
-      // Try to re-collect by triggering a small refresh via focus -> onAnnotationsLoad will be fired when viewer emits changes
-      // As fallback, request a full refresh by toggling a tiny navigation (no-op) to encourage event propagation:
       try {
         const pageIndex = wrapper.pageIndex ?? 0;
         viewerRef.current?.navigateToPage(pageIndex);
@@ -149,15 +200,21 @@ const Explore = () => {
     <div className="flex min-h-[calc(100vh-4rem)]">
       <PDFSidebar
         annotations={annotations}
+        signatureFields={signatureFields}
         fileName={fileName}
         isLoading={isLoading}
         onFileUpload={handleFileUpload}
         onToggleDraw={handleToggleDraw}
+        onAddSignatureField={handleAddSignatureField}
         onAnnotationSelect={handleAnnotationSelect}
         onNextAnnotation={handleNextAnnotation}
         onPreviousAnnotation={handlePreviousAnnotation}
-        onDeleteAnnotation={handleDeleteAnnotation} // wired here
+        onDeleteAnnotation={handleDeleteAnnotation}
+        onSignatureFieldSelect={handleSignatureFieldSelect}
+        onNextSignatureField={handleNextSignatureField}
+        onPreviousSignatureField={handlePreviousSignatureField}
         currentAnnotationIndex={currentAnnotationIndex}
+        currentSignatureFieldIndex={currentSignatureFieldIndex}
       />
 
       <main className="flex-1 bg-muted/30 relative">
@@ -173,6 +230,7 @@ const Explore = () => {
         <PDFViewer
           ref={viewerRef}
           onAnnotationsLoad={handleAnnotationsLoad}
+          onSignatureFieldsLoad={handleSignatureFieldsLoad}
           onDocumentLoad={handleDocumentLoad}
           onModeChange={(m) => setCurrentMode(m)}
         />
