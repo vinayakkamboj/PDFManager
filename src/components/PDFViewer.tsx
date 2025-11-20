@@ -1,10 +1,11 @@
-// PDFViewer.tsx
+// PDFViewer.tsx - Enhanced version with Sign Here overlay and double-click support
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from "react";
 
 interface PDFViewerProps {
   onAnnotationsLoad?: (annotations: any[]) => void;
   onSignatureFieldsLoad?: (signatureFields: any[]) => void;
   onDocumentLoad?: (fileName: string) => void;
+  onSignatureFieldFocus?: (signatureField: any, fieldIndex: number) => void;
   className?: string;
   onModeChange?: (mode: string) => void;
 }
@@ -25,19 +26,295 @@ let __tempClientIdCounter = 1;
 let __signatureFieldCounter = 1;
 
 const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  ({ onAnnotationsLoad, onSignatureFieldsLoad, onDocumentLoad, className = "", onModeChange }, ref) => {
+  ({ onAnnotationsLoad, onSignatureFieldsLoad, onDocumentLoad, onSignatureFieldFocus, className = "", onModeChange }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const instanceRef = useRef<any>(null);
     const [isInitialized, setIsInitialized] = useState(false);
+    const overlayItemIdRef = useRef<string | null>(null);
+    const [currentFocusedField, setCurrentFocusedField] = useState<any>(null);
+    const positionUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     /**
-     * Collect annotations across pages
+     * Detect background color at signature field position to determine theme
      */
+    const detectBackgroundColor = async (instance: any, signatureField: any): Promise<'light' | 'dark'> => {
+      try {
+        if (!signatureField || !signatureField.boundingBox) {
+          return 'light'; // Default to light
+        }
+
+        const pageIndex = signatureField.pageIndex;
+        const bbox = signatureField.boundingBox;
+
+        // Get canvas element for the page
+        const pageElement = instance.contentDocument?.querySelector(
+          `[data-page-index="${pageIndex}"]`
+        );
+
+        if (!pageElement) {
+          return 'light';
+        }
+
+        // Find canvas within the page element
+        const canvas = pageElement.querySelector('canvas');
+        if (!canvas) {
+          return 'light';
+        }
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return 'light';
+        }
+
+        // Get page dimensions and scale
+        const pageInfo = instance.pageInfoForIndex(pageIndex);
+        const scale = canvas.width / (pageInfo?.width ?? 612);
+
+        // Sample point near the signature field (left side where overlay appears)
+        const sampleX = Math.max(0, Math.floor((bbox.left - 100) * scale));
+        const sampleY = Math.floor((bbox.top + bbox.height / 2) * scale);
+
+        // Sample a small area (5x5 pixels) to get average color
+        const sampleSize = 5;
+        const imageData = ctx.getImageData(
+          Math.max(0, sampleX - sampleSize / 2),
+          Math.max(0, sampleY - sampleSize / 2),
+          sampleSize,
+          sampleSize
+        );
+
+        let totalBrightness = 0;
+        let pixelCount = 0;
+
+        // Calculate average brightness
+        for (let i = 0; i < imageData.data.length; i += 4) {
+          const r = imageData.data[i];
+          const g = imageData.data[i + 1];
+          const b = imageData.data[i + 2];
+          const a = imageData.data[i + 3];
+
+          // Only consider opaque pixels
+          if (a > 200) {
+            // Calculate relative luminance
+            const brightness = (0.299 * r + 0.587 * g + 0.114 * b);
+            totalBrightness += brightness;
+            pixelCount++;
+          }
+        }
+
+        if (pixelCount === 0) {
+          return 'light';
+        }
+
+        const avgBrightness = totalBrightness / pixelCount;
+
+        // If average brightness is less than 128 (middle), it's a dark background
+        return avgBrightness < 128 ? 'dark' : 'light';
+      } catch (err) {
+        console.warn("Failed to detect background color:", err);
+        return 'light'; // Default to light on error
+      }
+    };
+    /**
+     * Create and display "Sign Here" overlay using Nutrient's CustomOverlayItem API
+     */
+    const showSignHereOverlay = async (instance: any, signatureField: any) => {
+      try {
+        if (!signatureField || signatureField.isSigned || !signatureField.boundingBox) {
+          await removeSignHereOverlay(instance);
+          return;
+        }
+
+        const Nutrient = (await import("@nutrient-sdk/viewer")).default;
+        const bbox = signatureField.boundingBox;
+        const pageIndex = signatureField.pageIndex;
+
+        // Detect background color theme
+        const theme = await detectBackgroundColor(instance, signatureField);
+        const textColor = theme === 'dark' ? '#ffffff' : '#1f2937';
+        const arrowColor1 = theme === 'dark' ? '#e5e7eb' : '#6b7280';
+        const arrowColor2 = theme === 'dark' ? '#ffffff' : '#374151';
+
+        // Create the "Sign Here" indicator DOM element
+        const overlayNode = document.createElement("div");
+        overlayNode.className = "sign-here-overlay";
+        overlayNode.setAttribute('data-theme', theme);
+        overlayNode.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          pointer-events: none;
+        `;
+
+        overlayNode.innerHTML = `
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@700&display=swap');
+            
+            @keyframes subtleWave {
+              0%, 100% { transform: translateY(0px) rotate(0deg); }
+              50% { transform: translateY(-2px) rotate(1deg); }
+            }
+            
+            .sign-here-text {
+              font-family: 'Caveat', cursive;
+              font-weight: 700;
+              font-size: 32px;
+              color: ${textColor};
+              white-space: nowrap;
+              filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+              letter-spacing: 0.5px;
+              transition: color 2.5s ease-in-out;
+            }
+            
+            .sign-here-overlay:hover .sign-here-text,
+            .sign-here-overlay.waving .sign-here-text {
+              animation: subtleWave 1s ease-in-out;
+            }
+            
+            .arrow-svg {
+              filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+              transition: opacity 2.5s ease-in-out;
+            }
+          </style>
+          <div class="sign-here-text">
+            Sign Here
+          </div>
+          <svg class="arrow-svg" width="50" height="24" viewBox="0 0 50 24">
+            <defs>
+              <linearGradient id="arrowGradient-${Date.now()}" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:${arrowColor1};stop-opacity:1">
+                  <animate attributeName="stop-color" values="${arrowColor1};${arrowColor1}" dur="2.5s" fill="freeze" />
+                </stop>
+                <stop offset="100%" style="stop-color:${arrowColor2};stop-opacity:1">
+                  <animate attributeName="stop-color" values="${arrowColor2};${arrowColor2}" dur="2.5s" fill="freeze" />
+                </stop>
+              </linearGradient>
+            </defs>
+            <path
+              d="M 0 12 L 38 12 L 32 6 M 38 12 L 32 18"
+              stroke="url(#arrowGradient-${Date.now()})"
+              stroke-width="3.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        `;
+
+        // Position the overlay to the left of the signature field
+        const overlayX = bbox.left - 170; // 170px to the left of the field
+        const overlayY = bbox.top + (bbox.height / 2) - 20; // Vertically centered
+
+        const overlayId = `sign-here-${signatureField.id || Date.now()}`;
+        const overlayItem = new Nutrient.CustomOverlayItem({
+          id: overlayId,
+          node: overlayNode,
+          pageIndex: pageIndex,
+          position: new Nutrient.Geometry.Point({
+            x: Math.max(10, overlayX), // Ensure it doesn't go off-screen
+            y: Math.max(10, overlayY)
+          })
+        });
+
+        // Remove any existing overlay first
+        if (overlayItemIdRef.current) {
+          try {
+            await instance.removeCustomOverlayItem(overlayItemIdRef.current);
+          } catch (e) {
+            // Ignore errors if overlay doesn't exist
+          }
+        }
+
+        // Add the new overlay
+        await instance.setCustomOverlayItem(overlayItem);
+        overlayItemIdRef.current = overlayId;
+
+        console.log(`Sign Here overlay created with ${theme} theme at position:`, overlayX, overlayY);
+      } catch (err) {
+        console.warn("Failed to show sign here overlay:", err);
+      }
+    };
+
+    /**
+     * Remove the "Sign Here" overlay and clear tracking interval
+     */
+    const removeSignHereOverlay = async (instance: any) => {
+      try {
+        // Clear position tracking interval
+        if (positionUpdateIntervalRef.current) {
+          clearInterval(positionUpdateIntervalRef.current);
+          positionUpdateIntervalRef.current = null;
+        }
+
+        if (overlayItemIdRef.current && instance) {
+          await instance.removeCustomOverlayItem(overlayItemIdRef.current);
+          overlayItemIdRef.current = null;
+        }
+      } catch (e) {
+        // Ignore errors if overlay doesn't exist
+      }
+    };
+
+    /**
+     * Start tracking signature field position and update overlay periodically
+     */
+    const startPositionTracking = async (instance: any, signatureField: any) => {
+      // Clear any existing interval
+      if (positionUpdateIntervalRef.current) {
+        clearInterval(positionUpdateIntervalRef.current);
+      }
+
+      // Update position every 2 seconds
+      positionUpdateIntervalRef.current = setInterval(async () => {
+        try {
+          if (!currentFocusedField) {
+            // No field is focused, stop tracking
+            if (positionUpdateIntervalRef.current) {
+              clearInterval(positionUpdateIntervalRef.current);
+              positionUpdateIntervalRef.current = null;
+            }
+            return;
+          }
+
+          // Get updated signature fields
+          const updatedFields = await collectSignatureFields(instance);
+          const updatedField = updatedFields.find(f => f.name === currentFocusedField.name);
+
+          if (updatedField && !updatedField.isSigned) {
+            // Check if position or theme changed
+            const oldBbox = currentFocusedField.boundingBox;
+            const newBbox = updatedField.boundingBox;
+
+            if (!oldBbox || !newBbox) return;
+
+            const positionChanged = 
+              oldBbox.left !== newBbox.left || 
+              oldBbox.top !== newBbox.top ||
+              oldBbox.width !== newBbox.width ||
+              oldBbox.height !== newBbox.height;
+
+            // Always update to check for theme changes
+            setCurrentFocusedField(updatedField);
+            await showSignHereOverlay(instance, updatedField);
+
+            if (positionChanged) {
+              console.log("Signature field position updated, overlay repositioned");
+            }
+          } else if (!updatedField) {
+            // Field was deleted, stop tracking
+            await removeSignHereOverlay(instance);
+            setCurrentFocusedField(null);
+          }
+        } catch (err) {
+          console.warn("Position tracking update failed:", err);
+        }
+      }, 2000); // Update every 2 seconds
+    };
     const collectAnnotations = async (instance: any): Promise<any[]> => {
-      const out: any[] = [];
+      const annotations: any[] = [];
+      
       try {
         const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-
         const allowedTypes = [
           Nutrient.Annotations?.InkAnnotation,
           Nutrient.Annotations?.HighlightAnnotation,
@@ -49,193 +326,283 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         ].filter(Boolean);
 
         const totalPages = instance.totalPageCount ?? 0;
+        
         for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-          try {
-            const list = await instance.getAnnotations(pageIndex);
-            const pageArray =
-              list && typeof list.toArray === "function"
-                ? list.toArray()
-                : Array.from(list || []);
+          const pageAnnotations = await instance.getAnnotations(pageIndex);
+          const annotationsArray = pageAnnotations?.toArray?.() ?? Array.from(pageAnnotations || []);
 
-            for (let i = 0; i < pageArray.length; i++) {
-              const a = pageArray[i];
-              if (!a) continue;
+          for (const annotation of annotationsArray) {
+            if (!annotation) continue;
 
-              let isAllowedType = true;
-              if (allowedTypes.length > 0) {
-                isAllowedType = allowedTypes.some((Type) => {
-                  try {
-                    return Type && a instanceof Type;
-                  } catch (e) {
-                    return false;
-                  }
-                });
-
-                if (!isAllowedType) {
-                  const ctorName = a?.constructor?.name ?? "";
-                  const subtype = a?.type ?? a?.subtype ?? "";
-                  const nameLower = (ctorName + " " + subtype).toLowerCase();
-                  const allowedNames = [
-                    "ink",
-                    "highlight",
-                    "text",
-                    "note",
-                    "image",
-                    "shape",
-                    "stamp",
-                  ];
-                  isAllowedType = allowedNames.some((n) => nameLower.includes(n));
-                }
+            const isAllowed = allowedTypes.length === 0 || allowedTypes.some(Type => {
+              try {
+                return Type && annotation instanceof Type;
+              } catch {
+                return false;
               }
+            });
 
-              if (!isAllowedType) continue;
-
-              const bbox = a.boundingBox ?? (a.rects && a.rects.length ? a.rects[0] : null);
-              const hasVisibleText = !!(a?.text || a?.note || a?.subject);
-              const hasGeometry = !!bbox;
-
-              if (!hasVisibleText && !hasGeometry) continue;
-
-              const ctorName = a?.constructor?.name ?? "";
-              const type = a?.type ?? a?.subtype ?? ctorName ?? "annotation";
-
-              let clientId = a?.id ?? (a as any).__clientId;
-              if (!clientId) {
-                clientId = `temp-${++__tempClientIdCounter}`;
-                try {
-                  (a as any).__clientId = clientId;
-                } catch (e) {}
-              }
-
-              out.push({ sdk: a, pageIndex, boundingBox: bbox, type, clientId });
+            if (!isAllowed) {
+              const name = (annotation.constructor?.name ?? "") + " " + (annotation.type ?? annotation.subtype ?? "");
+              const isAllowedName = ["ink", "highlight", "text", "note", "image", "shape", "stamp"]
+                .some(n => name.toLowerCase().includes(n));
+              
+              if (!isAllowedName) continue;
             }
-          } catch (err) {}
+
+            const bbox = annotation.boundingBox ?? annotation.rects?.[0];
+            const hasText = !!(annotation.text || annotation.note || annotation.subject);
+            const hasGeometry = !!bbox;
+
+            if (!hasText && !hasGeometry) continue;
+
+            let clientId = annotation.id ?? (annotation as any).__clientId;
+            if (!clientId) {
+              clientId = `temp-${++__tempClientIdCounter}`;
+              try {
+                (annotation as any).__clientId = clientId;
+              } catch {}
+            }
+
+            annotations.push({
+              sdk: annotation,
+              pageIndex,
+              boundingBox: bbox,
+              type: annotation.type ?? annotation.subtype ?? annotation.constructor?.name ?? "annotation",
+              clientId
+            });
+          }
         }
       } catch (err) {
         console.error("collectAnnotations error:", err);
       }
-      return out;
+      
+      return annotations;
     };
 
     /**
-     * Collect signature form fields from the document - FIXED VERSION
+     * Collect signature form fields with proper page detection
      */
     const collectSignatureFields = async (instance: any): Promise<any[]> => {
-      const out: any[] = [];
+      const fields: any[] = [];
+      
       try {
         const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-        
         const formFields = await instance.getFormFields();
         
-        if (!formFields) return out;
+        if (!formFields) return fields;
 
-        const fieldsArray =
-          formFields && typeof formFields.toArray === "function"
-            ? formFields.toArray()
-            : Array.from(formFields || []);
+        const fieldsArray = formFields?.toArray?.() ?? Array.from(formFields || []);
+        const totalPages = instance.totalPageCount ?? 0;
 
         for (const field of fieldsArray) {
-          try {
-            const isSignatureField = 
-              field instanceof Nutrient.FormFields?.SignatureFormField ||
-              field?.type === "signature" ||
-              field?.fieldType === "signature" ||
-              (field?.constructor?.name || "").toLowerCase().includes("signature");
+          const isSignatureField = 
+            field instanceof Nutrient.FormFields?.SignatureFormField ||
+            field?.type === "signature" ||
+            field?.fieldType === "signature" ||
+            (field?.constructor?.name || "").toLowerCase().includes("signature");
 
-            if (isSignatureField) {
-              // FIXED: Find the widget annotation to get the ACTUAL page index
-              let widget = null;
-              let actualPageIndex = 0;
-              
-              const totalPages = instance.totalPageCount ?? 0;
-              for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-                const pageAnnotations = await instance.getAnnotations(pageIndex);
-                const pageAnnotationsArray = pageAnnotations && typeof pageAnnotations.toArray === "function"
-                  ? pageAnnotations.toArray()
-                  : Array.from(pageAnnotations || []);
-                
-                const foundWidget = pageAnnotationsArray.find(
-                  (annotation: any) =>
-                    annotation instanceof Nutrient.Annotations.WidgetAnnotation &&
-                    annotation.formFieldName === field.name
-                );
-                
-                if (foundWidget) {
-                  widget = foundWidget;
-                  actualPageIndex = pageIndex;
-                  break;
-                }
-              }
+          if (!isSignatureField) continue;
 
-              const boundingBox = widget?.boundingBox ?? null;
-              const isSigned = field.value != null && field.value !== "";
+          let widget = null;
+          let actualPageIndex = 0;
 
-              out.push({
-                id: field.id ?? field.name ?? `sig-${out.length}`,
-                sdk: field,
-                name: field.name ?? `Signature ${out.length + 1}`,
-                pageIndex: actualPageIndex, // FIXED: Use the actual page index from the widget
-                boundingBox,
-                isSigned,
-                widget,
-              });
+          for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+            const pageAnnotations = await instance.getAnnotations(pageIndex);
+            const annotationsArray = pageAnnotations?.toArray?.() ?? Array.from(pageAnnotations || []);
+            
+            const foundWidget = annotationsArray.find(
+              (ann: any) =>
+                ann instanceof Nutrient.Annotations.WidgetAnnotation &&
+                ann.formFieldName === field.name
+            );
+            
+            if (foundWidget) {
+              widget = foundWidget;
+              actualPageIndex = pageIndex;
+              break;
             }
-          } catch (err) {
-            console.warn("Error processing form field:", err);
           }
+
+          fields.push({
+            id: field.id ?? field.name ?? `sig-${fields.length}`,
+            sdk: field,
+            name: field.name ?? `Signature ${fields.length + 1}`,
+            pageIndex: actualPageIndex,
+            boundingBox: widget?.boundingBox ?? null,
+            isSigned: field.value != null && field.value !== "",
+            widget,
+          });
         }
       } catch (err) {
         console.error("collectSignatureFields error:", err);
       }
-      return out;
+      
+      return fields;
     };
 
+    /**
+     * Attach event listeners for annotation changes
+     */
     const attachAnnotationEvents = (instance: any, refreshFn: () => Promise<void>) => {
-      const onCreate = async (created: any) => {
-        await refreshFn();
-      };
-      const onUpdate = async (updated: any) => {
-        await refreshFn();
-      };
-      const onDelete = async (deleted: any) => {
-        await refreshFn();
-      };
-      try {
-        instance.addEventListener && instance.addEventListener("annotations.create", onCreate);
-        instance.addEventListener && instance.addEventListener("annotations.update", onUpdate);
-        instance.addEventListener && instance.addEventListener("annotations.delete", onDelete);
-      } catch (e) {
-        console.warn("Failed to attach annotation events:", e);
-      }
-      return () => {
+      const eventTypes = ["annotations.create", "annotations.update", "annotations.delete"];
+      const handler = async () => {
         try {
-          instance.removeEventListener && instance.removeEventListener("annotations.create", onCreate);
-          instance.removeEventListener && instance.removeEventListener("annotations.update", onUpdate);
-          instance.removeEventListener && instance.removeEventListener("annotations.delete", onDelete);
-        } catch (e) {}
+          await refreshFn();
+        } catch (e) {
+          console.warn("Refresh annotations failed:", e);
+        }
+      };
+
+      eventTypes.forEach(eventType => {
+        try {
+          instance.addEventListener?.(eventType, handler);
+        } catch (e) {
+          console.warn(`Failed to attach ${eventType}:`, e);
+        }
+      });
+
+      return () => {
+        eventTypes.forEach(eventType => {
+          try {
+            instance.removeEventListener?.(eventType, handler);
+          } catch {}
+        });
       };
     };
 
-    const attachFormFieldEvents = (instance: any, refreshSignaturesFn: () => Promise<void>) => {
-      const onFormFieldChange = async () => {
-        await refreshSignaturesFn();
-      };
-      try {
-        instance.addEventListener && instance.addEventListener("formFields.update", onFormFieldChange);
-        instance.addEventListener && instance.addEventListener("formFields.create", onFormFieldChange);
-        instance.addEventListener && instance.addEventListener("formFields.delete", onFormFieldChange);
-      } catch (e) {
-        console.warn("Failed to attach form field events:", e);
-      }
-      return () => {
+    /**
+     * Attach event listeners for form field changes and widget updates
+     */
+    const attachFormFieldEvents = (instance: any, refreshFn: () => Promise<void>) => {
+      const eventTypes = ["formFields.create", "formFields.update", "formFields.delete", "annotations.update"];
+      let isDragging = false;
+      let dragTimeout: NodeJS.Timeout | null = null;
+      
+      const handler = async (event?: any) => {
         try {
-          instance.removeEventListener && instance.removeEventListener("formFields.update", onFormFieldChange);
-          instance.removeEventListener && instance.removeEventListener("formFields.create", onFormFieldChange);
-          instance.removeEventListener && instance.removeEventListener("formFields.delete", onFormFieldChange);
-        } catch (e) {}
+          await refreshFn();
+          
+          // Handle widget drag and update overlay position
+          if (currentFocusedField && event?.type === "annotations.update") {
+            const updatedFields = await collectSignatureFields(instance);
+            const updatedField = updatedFields.find(f => f.name === currentFocusedField.name);
+            
+            if (updatedField) {
+              // Check if widget position changed (being dragged)
+              const oldBbox = currentFocusedField.boundingBox;
+              const newBbox = updatedField.boundingBox;
+              
+              if (oldBbox && newBbox) {
+                const positionChanged = 
+                  oldBbox.left !== newBbox.left || 
+                  oldBbox.top !== newBbox.top;
+                
+                if (positionChanged) {
+                  // Widget is being dragged
+                  isDragging = true;
+                  
+                  // Clear any existing timeout
+                  if (dragTimeout) {
+                    clearTimeout(dragTimeout);
+                  }
+                  
+                  // Update overlay position immediately during drag
+                  setCurrentFocusedField(updatedField);
+                  await showSignHereOverlay(instance, updatedField);
+                  
+                  // Set timeout to trigger wave animation after drag stops
+                  dragTimeout = setTimeout(async () => {
+                    isDragging = false;
+                    // Trigger wave animation by temporarily adding class
+                    const overlayElements = instance.contentDocument?.querySelectorAll('.sign-here-overlay');
+                    if (overlayElements) {
+                      overlayElements.forEach((el: HTMLElement) => {
+                        el.classList.add('waving');
+                        setTimeout(() => {
+                          el.classList.remove('waving');
+                        }, 1000);
+                      });
+                    }
+                  }, 300); // Wait 300ms after last update to consider drag stopped
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Refresh signature fields failed:", e);
+        }
+      };
+
+      eventTypes.forEach(eventType => {
+        try {
+          instance.addEventListener?.(eventType, handler);
+        } catch (e) {
+          console.warn(`Failed to attach ${eventType}:`, e);
+        }
+      });
+
+      return () => {
+        if (dragTimeout) {
+          clearTimeout(dragTimeout);
+        }
+        eventTypes.forEach(eventType => {
+          try {
+            instance.removeEventListener?.(eventType, handler);
+          } catch {}
+        });
       };
     };
 
+    /**
+     * Setup click handler for signature fields to show overlay
+     */
+    const setupSignatureFieldClickHandler = async (instance: any) => {
+      try {
+        const Nutrient = (await import("@nutrient-sdk/viewer")).default;
+        
+        // Listen for annotations.press events on widgets
+        instance.addEventListener("annotations.press", async (event: any) => {
+          if (event.annotation instanceof Nutrient.Annotations.WidgetAnnotation) {
+            const formFieldName = event.annotation.formFieldName;
+            
+            // Check if this is a signature field
+            const formFields = await instance.getFormFields();
+            const fieldsArray = formFields?.toArray?.() ?? Array.from(formFields || []);
+            const formField = fieldsArray.find((f: any) => f.name === formFieldName);
+            
+            if (formField instanceof Nutrient.FormFields.SignatureFormField) {
+              console.log("Signature field clicked:", formFieldName);
+              
+              // Get the full signature field data with widget and bounding box
+              const signatureFields = await collectSignatureFields(instance);
+              const clickedField = signatureFields.find(f => f.name === formFieldName);
+              
+              if (clickedField && !clickedField.isSigned) {
+                // Update the focused field and show overlay
+                setCurrentFocusedField(clickedField);
+                await showSignHereOverlay(instance, clickedField);
+                
+                // Start position tracking
+                await startPositionTracking(instance, clickedField);
+                
+                // Notify parent component about the clicked field
+                const fieldIndex = signatureFields.findIndex(f => f.name === formFieldName);
+                if (fieldIndex !== -1) {
+                  onSignatureFieldFocus?.(clickedField, fieldIndex);
+                }
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.warn("Failed to setup click handler:", err);
+      }
+    };
+
+    /**
+     * Load a new PDF document
+     */
     const loadNewDocument = async (arrayBuffer: ArrayBuffer, fileName: string) => {
       const container = containerRef.current;
       if (!container) throw new Error("Viewer container missing");
@@ -251,7 +618,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         instanceRef.current = null;
       }
 
-      // Enable form design mode on initialization
       const instance = await Nutrient.load({
         container,
         document: arrayBuffer,
@@ -263,47 +629,54 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
       instanceRef.current = instance;
 
-      const wrappers = await collectAnnotations(instance);
-      onAnnotationsLoad?.(wrappers);
+      const annotations = await collectAnnotations(instance);
+      onAnnotationsLoad?.(annotations);
 
-      const sigFields = await collectSignatureFields(instance);
-      onSignatureFieldsLoad?.(sigFields);
+      const signatureFields = await collectSignatureFields(instance);
+      onSignatureFieldsLoad?.(signatureFields);
 
       onDocumentLoad?.(fileName);
 
       attachAnnotationEvents(instance, async () => {
-        try {
-          const updated = await collectAnnotations(instance);
-          onAnnotationsLoad?.(updated);
-        } catch (e) {
-          console.warn("refresh annotations failed:", e);
-        }
+        const updated = await collectAnnotations(instance);
+        onAnnotationsLoad?.(updated);
       });
 
       attachFormFieldEvents(instance, async () => {
-        try {
-          const updated = await collectSignatureFields(instance);
-          onSignatureFieldsLoad?.(updated);
-        } catch (e) {
-          console.warn("refresh signature fields failed:", e);
+        const updated = await collectSignatureFields(instance);
+        onSignatureFieldsLoad?.(updated);
+      });
+
+      // Setup click handler for signature fields
+      await setupSignatureFieldClickHandler(instance);
+
+      // Listen for scroll/zoom/page changes to hide overlay temporarily
+      instance.addEventListener("viewState.change", async () => {
+        if (currentFocusedField) {
+          // Re-show overlay after view state changes
+          await showSignHereOverlay(instance, currentFocusedField);
         }
       });
     };
 
+    /**
+     * Initialize viewer on mount
+     */
     useEffect(() => {
       let mounted = true;
-      let detachAnnotationsFn: (() => void) | null = null;
-      let detachFormFieldsFn: (() => void) | null = null;
+      let detachAnnotations: (() => void) | null = null;
+      let detachFormFields: (() => void) | null = null;
 
       (async () => {
         const container = containerRef.current;
         if (!container) return;
+
         try {
           const Nutrient = (await import("@nutrient-sdk/viewer")).default;
 
           try {
             await Nutrient.unload(container);
-          } catch (e) {}
+          } catch {}
 
           const instance = await Nutrient.load({
             container,
@@ -315,50 +688,76 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           });
 
           if (!mounted) {
-            try { await Nutrient.unload(container); } catch (e) {}
+            try {
+              await Nutrient.unload(container);
+            } catch {}
             return;
           }
 
           instanceRef.current = instance;
           setIsInitialized(true);
 
-          const wrappers = await collectAnnotations(instance);
-          onAnnotationsLoad?.(wrappers);
+          const annotations = await collectAnnotations(instance);
+          onAnnotationsLoad?.(annotations);
 
-          const sigFields = await collectSignatureFields(instance);
-          onSignatureFieldsLoad?.(sigFields);
+          const signatureFields = await collectSignatureFields(instance);
+          onSignatureFieldsLoad?.(signatureFields);
 
           onDocumentLoad?.("nutrient-web-demo.pdf");
 
-          detachAnnotationsFn = attachAnnotationEvents(instance, async () => {
+          detachAnnotations = attachAnnotationEvents(instance, async () => {
             const updated = await collectAnnotations(instance);
             onAnnotationsLoad?.(updated);
           });
 
-          detachFormFieldsFn = attachFormFieldEvents(instance, async () => {
+          detachFormFields = attachFormFieldEvents(instance, async () => {
             const updated = await collectSignatureFields(instance);
             onSignatureFieldsLoad?.(updated);
           });
+
+          // Setup click handler for signature fields
+          await setupSignatureFieldClickHandler(instance);
+
+          // Listen for view state changes
+          instance.addEventListener("viewState.change", async () => {
+            if (currentFocusedField) {
+              await showSignHereOverlay(instance, currentFocusedField);
+            }
+          });
         } catch (err) {
-          console.error("Viewer init failed:", err);
+          console.error("Viewer initialization failed:", err);
         }
       })();
 
       return () => {
         mounted = false;
+        detachAnnotations?.();
+        detachFormFields?.();
+        
+        // Clear position tracking interval
+        if (positionUpdateIntervalRef.current) {
+          clearInterval(positionUpdateIntervalRef.current);
+          positionUpdateIntervalRef.current = null;
+        }
+        
         (async () => {
           const c = containerRef.current;
+          const instance = instanceRef.current;
+          if (instance) {
+            await removeSignHereOverlay(instance);
+          }
           if (!c) return;
           try {
             const Nutrient = (await import("@nutrient-sdk/viewer")).default;
             await Nutrient.unload(c);
-          } catch (e) {}
+          } catch {}
         })();
-        if (typeof detachAnnotationsFn === "function") detachAnnotationsFn();
-        if (typeof detachFormFieldsFn === "function") detachFormFieldsFn();
       };
     }, []);
 
+    /**
+     * Expose methods via ref
+     */
     useImperativeHandle(ref, () => ({
       loadDocument: async (file: File) => {
         if (!isInitialized) throw new Error("Viewer not ready");
@@ -369,9 +768,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       navigateToPage: (pageIndex: number) => {
         if (!instanceRef.current) return;
         try {
-          instanceRef.current.setViewState((vs: any) =>
-            vs.set("currentPageIndex", pageIndex)
-          );
+          instanceRef.current.setViewState((vs: any) => vs.set("currentPageIndex", pageIndex));
         } catch (e) {
           console.error("navigateToPage failed:", e);
         }
@@ -395,34 +792,27 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       focusAnnotation: async (annotationWrapper: any) => {
         if (!instanceRef.current || !annotationWrapper) return;
         const instance = instanceRef.current;
+        
         try {
+          // Hide sign here overlay when focusing on annotations
+          await removeSignHereOverlay(instance);
+          setCurrentFocusedField(null);
+
           const pageIndex = annotationWrapper.pageIndex;
 
-          try {
-            instance.setViewState((vs: any) => vs.set("currentPageIndex", pageIndex));
-          } catch (e) {
-            try {
-              if (typeof instance.navigateToPage === "function") instance.navigateToPage(pageIndex);
-            } catch (e2) {}
-          }
-
+          instance.setViewState((vs: any) => vs.set("currentPageIndex", pageIndex));
           await new Promise(resolve => setTimeout(resolve, 100));
 
-          try {
-            if (typeof instance.setSelectedAnnotation === "function") {
-              await instance.setSelectedAnnotation(annotationWrapper.sdk);
-            } else if (typeof instance.select === "function") {
-              instance.select(annotationWrapper.sdk);
-            }
-          } catch (e) {
-            console.warn("Could not select annotation:", e);
+          if (typeof instance.setSelectedAnnotation === "function") {
+            await instance.setSelectedAnnotation(annotationWrapper.sdk);
+          } else if (typeof instance.select === "function") {
+            instance.select(annotationWrapper.sdk);
           }
         } catch (err) {
           console.error("focusAnnotation error:", err);
         }
       },
 
-      // FIXED: Navigate to signature field and center it in view
       focusSignatureField: async (signatureField: any) => {
         if (!instanceRef.current || !signatureField) return;
         const instance = instanceRef.current;
@@ -430,11 +820,8 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         try {
           const Nutrient = (await import("@nutrient-sdk/viewer")).default;
           
-          // Get the form field from the instance
           const formFields = await instance.getFormFields();
-          const formFieldsArray = formFields && typeof formFields.toArray === "function"
-            ? formFields.toArray()
-            : Array.from(formFields || []);
+          const formFieldsArray = formFields?.toArray?.() ?? Array.from(formFields || []);
           
           const field = formFieldsArray.find(
             (formField: any) =>
@@ -447,21 +834,18 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             return;
           }
 
-          // Find the widget annotation for this field by searching all pages
           let widget = null;
           let actualPageIndex = 0;
-
           const totalPages = instance.totalPageCount ?? 0;
+
           for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
             const pageAnnotations = await instance.getAnnotations(pageIndex);
-            const pageAnnotationsArray = pageAnnotations && typeof pageAnnotations.toArray === "function"
-              ? pageAnnotations.toArray()
-              : Array.from(pageAnnotations || []);
+            const annotationsArray = pageAnnotations?.toArray?.() ?? Array.from(pageAnnotations || []);
             
-            const foundWidget = pageAnnotationsArray.find(
-              (annotation: any) =>
-                annotation instanceof Nutrient.Annotations.WidgetAnnotation &&
-                annotation.formFieldName === field.name
+            const foundWidget = annotationsArray.find(
+              (ann: any) =>
+                ann instanceof Nutrient.Annotations.WidgetAnnotation &&
+                ann.formFieldName === field.name
             );
             
             if (foundWidget) {
@@ -478,20 +862,13 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
           console.log(`Navigating to signature field "${field.name}" on page ${actualPageIndex + 1}`);
 
-          // Navigate to the correct page
-          instance.setViewState((vs: any) => 
-            vs.set("currentPageIndex", actualPageIndex)
-          );
-
-          // Wait for page to render
+          instance.setViewState((vs: any) => vs.set("currentPageIndex", actualPageIndex));
           await new Promise(resolve => setTimeout(resolve, 300));
 
-          // Center the signature field in the viewport
           if (widget.boundingBox) {
             try {
               const rect = new Nutrient.Geometry.Rect(widget.boundingBox);
               
-              // Use ensureVisible with center option for better centering
               if (typeof instance.ensureVisible === "function") {
                 await instance.ensureVisible(rect, actualPageIndex, { 
                   position: 'center',
@@ -499,16 +876,35 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 });
               } else if (typeof instance.jumpToRect === "function") {
                 await instance.jumpToRect(actualPageIndex, widget.boundingBox);
-              } else if (typeof instance.scrollToRect === "function") {
-                await instance.scrollToRect(widget.boundingBox, actualPageIndex);
               }
             } catch (e) {
               console.warn("Could not center signature field:", e);
             }
           }
 
-          console.log("Signature field is now centered in the viewer");
+          await new Promise(resolve => setTimeout(resolve, 200));
 
+          if (typeof instance.setSelectedAnnotation === "function") {
+            await instance.setSelectedAnnotation(widget);
+          } else if (typeof instance.select === "function") {
+            instance.select(widget);
+          }
+
+          // Show the "Sign Here" overlay after navigation
+          const updatedField = {
+            ...signatureField,
+            widget,
+            pageIndex: actualPageIndex,
+            boundingBox: widget.boundingBox
+          };
+          setCurrentFocusedField(updatedField);
+          await showSignHereOverlay(instance, updatedField);
+
+          // Start position tracking
+          await startPositionTracking(instance, updatedField);
+
+          // Double-click is automatically handled by Nutrient SDK
+          // When user clicks the signature field, the signature modal opens
         } catch (err) {
           console.error("focusSignatureField error:", err);
         }
@@ -519,13 +915,13 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         try {
           const Nutrient = (await import("@nutrient-sdk/viewer")).default;
           const inkMode = Nutrient?.InteractionMode?.INK;
-          if (typeof inkMode !== "undefined") {
+          
+          if (inkMode) {
             instanceRef.current.setViewState((vs: any) => vs.set("interactionMode", inkMode));
             onModeChange?.("ink");
           } else if (typeof instanceRef.current.activateTool === "function") {
-            try { await instanceRef.current.activateTool("ink"); onModeChange?.("ink"); } catch (e) {}
-          } else {
-            console.warn("Could not set draw mode - InteractionMode.INK not available.");
+            await instanceRef.current.activateTool("ink");
+            onModeChange?.("ink");
           }
         } catch (err) {
           console.error("enterDrawMode failed:", err);
@@ -543,20 +939,15 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         try {
           const Nutrient = (await import("@nutrient-sdk/viewer")).default;
 
-          // Enable form design mode to allow dragging and resizing
-          instance.setViewState((viewState: any) =>
-            viewState.set("formDesignMode", true)
-          );
+          instance.setViewState((viewState: any) => viewState.set("formDesignMode", true));
 
           const viewState = instance.viewState;
           const currentPageIndex = viewState?.currentPageIndex ?? 0;
 
-          // Get the page dimensions to center the field
           const pageInfo = instance.pageInfoForIndex(currentPageIndex);
           const pageWidth = pageInfo?.width ?? 612;
           const pageHeight = pageInfo?.height ?? 792;
 
-          // Calculate center position
           const fieldWidth = 200;
           const fieldHeight = 80;
           const centerLeft = (pageWidth - fieldWidth) / 2;
@@ -587,10 +978,8 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
           console.log(`Signature field "${fieldName}" added at center of page ${currentPageIndex + 1}`);
 
-          // Wait for the field to be created
           await new Promise(resolve => setTimeout(resolve, 100));
 
-          // Center the viewport on the newly created field
           const rect = new Nutrient.Geometry.Rect({
             left: centerLeft,
             top: centerTop,
@@ -611,11 +1000,41 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             console.warn("Could not center viewport on new field:", e);
           }
 
+          // Wait a bit for the field to be fully created and registered
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          // Collect the updated signature fields to get the newly created one
+          const updatedFields = await collectSignatureFields(instance);
+          const newField = updatedFields.find(f => f.name === fieldName);
+
+          if (newField) {
+            console.log("New signature field found, showing Sign Here overlay");
+            // Update the focused field state
+            setCurrentFocusedField(newField);
+            // Show the "Sign Here" overlay for the newly created field
+            await showSignHereOverlay(instance, newField);
+            
+            // Start position tracking
+            await startPositionTracking(instance, newField);
+            
+            // Trigger the wave animation after a short delay
+            setTimeout(() => {
+              const overlayElements = instance.contentDocument?.querySelectorAll('.sign-here-overlay');
+              if (overlayElements) {
+                overlayElements.forEach((el: HTMLElement) => {
+                  el.classList.add('waving');
+                  setTimeout(() => {
+                    el.classList.remove('waving');
+                  }, 1000);
+                });
+              }
+            }, 100);
+          } else {
+            console.warn("Could not find newly created signature field");
+          }
         } catch (err) {
           console.error("Failed to add signature field:", err);
-          
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
-          alert(`Failed to add signature field: ${errorMessage}\n\nPlease ensure:\n- The PDF is loaded\n- You have permission to edit the PDF\n- The Nutrient SDK supports form field creation`);
+          alert(`Failed to add signature field: ${err instanceof Error ? err.message : "Unknown error"}`);
         }
       },
 
@@ -628,20 +1047,19 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         const instance = instanceRef.current;
 
         try {
-          // Delete the widget annotation(s) first
-          if (signatureField.widget) {
-            try {
-              await instance.delete(signatureField.widget);
-            } catch (e) {
-              console.warn("Failed to delete widget annotation:", e);
-            }
+          // Hide overlay when deleting
+          if (currentFocusedField?.name === signatureField.name) {
+            await removeSignHereOverlay(instance);
+            setCurrentFocusedField(null);
           }
 
-          // If there are multiple widget annotations linked to this field, delete them all
+          if (signatureField.widget) {
+            await instance.delete(signatureField.widget);
+          }
+
           if (signatureField.sdk?.annotationIds) {
-            const annotationIds = signatureField.sdk.annotationIds.toArray 
-              ? signatureField.sdk.annotationIds.toArray() 
-              : Array.from(signatureField.sdk.annotationIds || []);
+            const annotationIds = signatureField.sdk.annotationIds?.toArray?.() ?? 
+                                  Array.from(signatureField.sdk.annotationIds || []);
 
             for (const annotationId of annotationIds) {
               try {
@@ -655,12 +1073,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             }
           }
 
-          // Delete the form field itself
-          try {
-            await instance.delete(signatureField.sdk);
-          } catch (e) {
-            console.warn("Failed to delete form field:", e);
-          }
+          await instance.delete(signatureField.sdk);
 
           console.log("Signature field deleted successfully");
         } catch (err) {
@@ -674,7 +1087,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       <div
         ref={containerRef}
         className={`h-full w-full ${className}`}
-        style={{ height: "100%", minHeight: "500px" }}
+        style={{ height: "100%", minHeight: "500px", position: "relative" }}
       />
     );
   }

@@ -1,4 +1,4 @@
-// Explore.tsx
+// Explore.tsx - Updated with viewer-sidebar synchronization
 import { useState, useRef, useEffect } from "react";
 import PDFSidebar from "@/components/PDFSidebar";
 import PDFViewer, { PDFViewerHandle } from "@/components/PDFViewer";
@@ -54,6 +54,16 @@ const Explore = () => {
 
   const handleDocumentLoad = (name: string) => setFileName(name);
 
+  // NEW: Handle signature field focus from viewer clicks
+  const handleSignatureFieldFocus = (signatureField: any, fieldIndex: number) => {
+    console.log("Signature field clicked in viewer:", signatureField.name, "at index:", fieldIndex);
+    
+    // Update the sidebar to show this field as selected
+    setCurrentSignatureFieldIndex(fieldIndex);
+    // Deselect annotations when a signature field is focused
+    setCurrentAnnotationIndex(-1);
+  };
+
   // Keep annotation index in bounds
   useEffect(() => {
     if (annotations.length === 0) {
@@ -81,6 +91,8 @@ const Explore = () => {
     const wrapper = annotations[index];
     if (!wrapper) return;
     setCurrentAnnotationIndex(index);
+    // Deselect signature fields when focusing on annotations
+    setCurrentSignatureFieldIndex(-1);
     try {
       if (viewerRef.current) {
         await viewerRef.current.focusAnnotation(wrapper);
@@ -111,6 +123,8 @@ const Explore = () => {
     const field = signatureFields[index];
     if (!field) return;
     setCurrentSignatureFieldIndex(index);
+    // Deselect annotations when focusing on signature fields
+    setCurrentAnnotationIndex(-1);
     try {
       if (viewerRef.current) {
         await viewerRef.current.focusSignatureField(field);
@@ -190,7 +204,6 @@ const Explore = () => {
     }
   };
 
-  // NEW: Delete signature field handler
   const handleDeleteSignatureField = async (field: any, index: number) => {
     if (!viewerRef.current) return;
 
@@ -266,6 +279,7 @@ const Explore = () => {
           onAnnotationsLoad={handleAnnotationsLoad}
           onSignatureFieldsLoad={handleSignatureFieldsLoad}
           onDocumentLoad={handleDocumentLoad}
+          onSignatureFieldFocus={handleSignatureFieldFocus}
           onModeChange={(m) => setCurrentMode(m)}
         />
       </main>
