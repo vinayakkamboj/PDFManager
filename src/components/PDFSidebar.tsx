@@ -1,6 +1,6 @@
 // PDFSidebar.tsx
 import { useState, useRef } from "react";
-import { Upload, FileText, Edit2, ChevronRight, ChevronLeft, List, X, PenTool, Plus } from "lucide-react";
+import { Upload, FileText, Edit2, ChevronRight, ChevronLeft, List, X, PenTool, Plus, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -22,11 +22,13 @@ import {
 interface PDFSidebarProps {
   annotations: any[];
   signatureFields: any[];
+  formFields: any[];
   fileName: string;
   isLoading: boolean;
   onFileUpload: (file: File) => void;
   onToggleDraw: () => void;
   onAddSignatureField: () => void;
+  onAddFormField: () => void;
   onAnnotationSelect: (annotationWrapper: any, index: number) => void;
   onNextAnnotation: () => void;
   onPreviousAnnotation: () => void;
@@ -35,18 +37,25 @@ interface PDFSidebarProps {
   onNextSignatureField: () => void;
   onPreviousSignatureField: () => void;
   onDeleteSignatureField: (signatureField: any, index: number) => void;
+  onFormFieldSelect: (formField: any, index: number) => void;
+  onNextFormField: () => void;
+  onPreviousFormField: () => void;
+  onDeleteFormField: (formField: any, index: number) => void;
   currentAnnotationIndex: number;
   currentSignatureFieldIndex: number;
+  currentFormFieldIndex: number;
 }
 
 const PDFSidebar = ({
   annotations,
   signatureFields,
+  formFields,
   fileName,
   isLoading,
   onFileUpload,
   onToggleDraw,
   onAddSignatureField,
+  onAddFormField,
   onAnnotationSelect,
   onNextAnnotation,
   onPreviousAnnotation,
@@ -55,11 +64,16 @@ const PDFSidebar = ({
   onNextSignatureField,
   onPreviousSignatureField,
   onDeleteSignatureField,
+  onFormFieldSelect,
+  onNextFormField,
+  onPreviousFormField,
+  onDeleteFormField,
   currentAnnotationIndex,
   currentSignatureFieldIndex,
+  currentFormFieldIndex,
 }: PDFSidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<"draw" | "signature">("draw");
+  const [activeTab, setActiveTab] = useState<"draw" | "signature" | "forms">("draw");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,6 +100,14 @@ const PDFSidebar = ({
       onDeleteSignatureField?.(field, index);
     } catch (e) {
       console.error("onDeleteSignatureField handler threw:", e);
+    }
+  };
+
+  const handleDeleteFormFieldClick = (field: any, index: number) => {
+    try {
+      onDeleteFormField?.(field, index);
+    } catch (e) {
+      console.error("onDeleteFormField handler threw:", e);
     }
   };
 
@@ -168,7 +190,7 @@ const PDFSidebar = ({
         {!isCollapsed && (
           <div className="p-4 shrink-0">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Mode</h3>
-            <Select value={activeTab} onValueChange={(value: "draw" | "signature") => setActiveTab(value)}>
+            <Select value={activeTab} onValueChange={(value: "draw" | "signature" | "forms") => setActiveTab(value)}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select mode" />
               </SelectTrigger>
@@ -183,6 +205,12 @@ const PDFSidebar = ({
                   <div className="flex items-center gap-2">
                     <PenTool className="h-4 w-4" />
                     <span>Signature Fields</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="forms">
+                  <div className="flex items-center gap-2">
+                    <Square className="h-4 w-4" />
+                    <span>Form Fields</span>
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -218,6 +246,20 @@ const PDFSidebar = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="right">Signature Fields</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={activeTab === "forms" ? "default" : "outline"}
+                  size="icon"
+                  onClick={() => setActiveTab("forms")}
+                  className="w-full"
+                >
+                  <Square className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Form Fields</TooltipContent>
             </Tooltip>
           </div>
         )}
@@ -378,7 +420,7 @@ const PDFSidebar = ({
               </div>
             </div>
           </>
-        ) : (
+        ) : activeTab === "signature" ? (
           <>
             {/* Add Signature Field button */}
             <div className="p-4 shrink-0">
@@ -530,6 +572,164 @@ const PDFSidebar = ({
 
                 {!isCollapsed && signatureFields.length > 0 && (
                   <div className="mt-3 text-center text-xs text-muted-foreground">{currentSignatureFieldIndex + 1} / {signatureFields.length}</div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Add Form Field button */}
+            <div className="p-4 shrink-0">
+              {!isCollapsed && (
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Add Field</h3>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size={isCollapsed ? "icon" : "default"}
+                    onClick={onAddFormField}
+                    className={cn(
+                      "hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", 
+                      !isCollapsed && "w-full justify-start"
+                    )}
+                  >
+                    <Plus className="h-4 w-4" />
+                    {!isCollapsed && <span className="ml-2">Add Form Field</span>}
+                  </Button>
+                </TooltipTrigger>
+                {isCollapsed && <TooltipContent side="right">Add a form field to the PDF</TooltipContent>}
+              </Tooltip>
+            </div>
+
+            <Separator />
+
+            {/* Form Fields list */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 min-h-0 flex flex-col">
+              {!isCollapsed ? (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-3 shrink-0">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Form Fields</h3>
+                    <Badge variant="outline" className="text-xs">{formFields.length}</Badge>
+                  </div>
+
+                  {formFields.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center text-sm text-muted-foreground">No form fields</div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 flex-1 overflow-y-auto">
+                      {formFields.map((field: any, index: number) => {
+                        const fieldName = field.name ?? `Field ${index + 1}`;
+                        const fieldType = field.type ?? "text";
+                        const fieldValue = field.value ?? "";
+                        const key = field.id ?? `form-${index}`;
+                        
+                        return (
+                          <div
+                            key={key}
+                            className={cn(
+                              "rounded-lg border p-3 text-xs transition-all cursor-pointer hover:shadow-md relative",
+                              currentFormFieldIndex === index ? "bg-primary/10 border-primary shadow-sm" : "border-border hover:border-primary/30 bg-card"
+                            )}
+                            onClick={() => onFormFieldSelect(field, index)}
+                          >
+                            <div className="flex items-start justify-between mb-1">
+                              <div className="flex items-start gap-2 flex-1">
+                                <span className="font-medium text-foreground">Field {index + 1}</span>
+                                <Badge 
+                                  variant="outline"
+                                  className="text-[10px] capitalize"
+                                >
+                                  {fieldType}
+                                </Badge>
+                              </div>
+
+                              <div className="ml-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteFormFieldClick(field, index);
+                                      }}
+                                      aria-label={`Delete form field ${index + 1}`}
+                                      className="inline-flex items-center justify-center h-6 w-6 rounded hover:bg-destructive/10"
+                                      title="Delete form field"
+                                    >
+                                      <X className="h-4 w-4 text-destructive" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="left">Delete</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </div>
+
+                            <div className="mt-1 text-muted-foreground text-[11px] leading-relaxed">
+                              <div className="font-medium mb-1">{fieldName}</div>
+                              <div className="text-[10px] text-muted-foreground/70">
+                                Page {(field.pageIndex ?? 0) + 1}
+                                {fieldValue && <span className="ml-2">• Value: {fieldValue}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex justify-center py-2">
+                      <div className="relative">
+                        <Square className="h-5 w-5 text-muted-foreground" />
+                        {formFields.length > 0 && <Badge className="absolute -top-1 -right-2 h-4 w-4 p-0 flex items-center justify-center text-[10px]">{formFields.length}</Badge>}
+                      </div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Form Fields ({formFields.length})</TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* Navigation for form fields */}
+              <div className="mt-4 pt-4 border-t border-border shrink-0">
+                <div className={cn("flex gap-2", isCollapsed && "flex-col items-center")}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size={isCollapsed ? "icon" : "default"}
+                        onClick={onPreviousFormField}
+                        disabled={formFields.length === 0}
+                        className={cn("transition-all hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", !isCollapsed && "flex-1")}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        {!isCollapsed && <span className="ml-1">Previous</span>}
+                      </Button>
+                    </TooltipTrigger>
+                    {isCollapsed && <TooltipContent side="right">Previous</TooltipContent>}
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size={isCollapsed ? "icon" : "default"}
+                        onClick={onNextFormField}
+                        disabled={formFields.length === 0}
+                        className={cn("transition-all hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", !isCollapsed && "flex-1")}
+                      >
+                        {!isCollapsed && <span className="mr-1">Next</span>}
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    {isCollapsed && <TooltipContent side="right">Next</TooltipContent>}
+                  </Tooltip>
+                </div>
+
+                {!isCollapsed && formFields.length > 0 && (
+                  <div className="mt-3 text-center text-xs text-muted-foreground">{currentFormFieldIndex + 1} / {formFields.length}</div>
                 )}
               </div>
             </div>
