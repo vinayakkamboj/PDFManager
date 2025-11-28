@@ -1,4 +1,4 @@
-// PDFViewer.tsx - Form Creator Mode with Real-Time Value Logging
+// PDFViewer.tsx - Clean Console Logging (Field, Value, Type only)
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from "react";
 
 interface PDFViewerProps {
@@ -14,7 +14,6 @@ export interface PDFViewerHandle {
   unloadDocument: () => Promise<void>;
   focusFormField: (formField: any) => Promise<void>;
   addFormField: () => Promise<void>;
-  addHeader: () => Promise<void>;
   deleteFormField: (formField: any) => Promise<void>;
 }
 
@@ -37,9 +36,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           viewState.set("interactionMode", Nutrient.InteractionMode.FORM_CREATOR)
         );
         
-        console.log("🎨 Form Creator Mode ACTIVATED!");
-        console.log("✅ You can now click on the PDF to place form fields");
-        
         return true;
       } catch (err) {
         console.error("Failed to activate Form Creator mode:", err);
@@ -58,11 +54,8 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           viewState.set("interactionMode", null)
         );
         
-        console.log("👆 Form Creator Mode deactivated - back to normal interaction");
-        
         return true;
       } catch (err) {
-        console.error("Failed to deactivate Form Creator mode:", err);
         return false;
       }
     };
@@ -152,7 +145,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         try {
           await refreshFormFn();
         } catch (e) {
-          console.warn("Refresh form fields failed:", e);
+          // console.warn("Refresh form fields failed:", e);
         }
       };
 
@@ -174,37 +167,24 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     };
 
     /**
-     * THE KEY EVENT LISTENER - formFieldValues.update
-     * This logs EVERY keystroke and value change in real-time!
+     * CLEAN CONSOLE LOGGING - Only Field, Input Value, Type
      */
     const attachFormValueChangeListener = (instance: any) => {
       const formFieldValuesUpdateHandler = (formFieldValues: any) => {
-        // Convert Immutable.List to array if needed
         const valuesArray = formFieldValues?.toArray?.() ?? Array.from(formFieldValues || []);
         
-        // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        // console.log("⌨️  FORM FIELD VALUE CHANGED (Real-Time):");
-        // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        
         valuesArray.forEach((fieldValue: any) => {
-          // Convert to plain JS object if it's an Immutable structure
           const value = fieldValue?.toJS?.() ?? fieldValue;
           
           console.log("Field:", value.name);
           console.log("Input Value:", value.value ?? "(empty)");
           console.log("Type:", value.type ?? "unknown");
-          // console.log("---");
         });
-        
-        // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       };
 
       try {
-        // This is THE event that fires on every keystroke!
         instance.addEventListener("formFieldValues.update", formFieldValuesUpdateHandler);
-        
-        console.log("✅ Real-time form value listener attached!");
-        console.log("💡 Every keystroke in form fields will now be logged!");
+        // console.log("✅ Real-time form value listener attached!");
       } catch (e) {
         console.error("Failed to attach formFieldValues.update listener:", e);
       }
@@ -212,35 +192,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return () => {
         try {
           instance.removeEventListener("formFieldValues.update", formFieldValuesUpdateHandler);
-        } catch {}
-      };
-    };
-
-    /**
-     * Additional event listeners for focus/blur
-     */
-    const attachFormInteractionEvents = (instance: any) => {
-      const focusHandler = (event: any) => {
-        const annotation = event.annotation?.toJS?.() ?? event.annotation;
-        console.log("🎯 User focused on field:", annotation.formFieldName);
-      };
-
-      const blurHandler = async (event: any) => {
-        const annotation = event.annotation?.toJS?.() ?? event.annotation;
-        console.log("👋 User left field:", annotation.formFieldName);
-      };
-
-      try {
-        instance.addEventListener("annotations.focus", focusHandler);
-        instance.addEventListener("annotations.blur", blurHandler);
-      } catch (e) {
-        console.warn("Failed to attach focus/blur events:", e);
-      }
-
-      return () => {
-        try {
-          instance.removeEventListener("annotations.focus", focusHandler);
-          instance.removeEventListener("annotations.blur", blurHandler);
         } catch {}
       };
     };
@@ -290,14 +241,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         }
       );
 
-      // Attach the real-time value change listener
       attachFormValueChangeListener(instance);
-      attachFormInteractionEvents(instance);
-
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-      console.log("✨ PDF LOADED SUCCESSFULLY!");
-      console.log("⌨️  Real-time keystroke logging is ACTIVE!");
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     };
 
     /**
@@ -307,7 +251,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       let mounted = true;
       let detachFormFields: (() => void) | null = null;
       let detachFormValues: (() => void) | null = null;
-      let detachInteractions: (() => void) | null = null;
 
       (async () => {
         const container = containerRef.current;
@@ -355,20 +298,9 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             }
           );
 
-          // THE MOST IMPORTANT: Attach real-time value change listener
           detachFormValues = attachFormValueChangeListener(instance);
-          detachInteractions = attachFormInteractionEvents(instance);
 
-          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-          console.log("✨ FORM CREATOR MODE ENABLED!");
-          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-          console.log("📋 HOW TO TEST:");
-          console.log("1. Click 'Add Text Field' or 'Add Header' in the sidebar");
-          console.log("2. Click on a field and start typing");
-          console.log("3. Watch this console - EVERY keystroke will be logged!");
-          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-          console.log("⌨️  Real-time keystroke logging is ACTIVE!");
-          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+          // console.log("✅ PDF Viewer initialized with real-time logging");
         } catch (err) {
           console.error("Viewer initialization failed:", err);
         }
@@ -378,7 +310,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         mounted = false;
         detachFormFields?.();
         detachFormValues?.();
-        detachInteractions?.();
         
         (async () => {
           const c = containerRef.current;
@@ -474,7 +405,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
           await instance.create([widget, formField]);
 
-          console.log(`✅ Text field "${fieldName}" added - type in it to see real-time logging!`);
+          console.log(`Text field "${fieldName}" added`);
 
           await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -510,95 +441,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         } catch (err) {
           console.error("Failed to add form field:", err);
           alert(`Failed to add form field: ${err instanceof Error ? err.message : "Unknown error"}`);
-        }
-      },
-
-      addHeader: async () => {
-        if (!instanceRef.current) {
-          console.error("Viewer instance not available");
-          return;
-        }
-
-        const instance = instanceRef.current;
-
-        try {
-          const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-
-          await activateFormCreatorMode(instance);
-
-          const viewState = instance.viewState;
-          const currentPageIndex = viewState?.currentPageIndex ?? 0;
-
-          const pageInfo = instance.pageInfoForIndex(currentPageIndex);
-          const pageWidth = pageInfo?.width ?? 612;
-          const pageHeight = pageInfo?.height ?? 792;
-
-          const fieldWidth = 400;
-          const fieldHeight = 60;
-          const centerLeft = (pageWidth - fieldWidth) / 2;
-          const topMargin = 50;
-
-          const fieldName = `header_field_${Date.now()}_${__formFieldCounter++}`;
-
-          const widget = new Nutrient.Annotations.WidgetAnnotation({
-            id: Nutrient.generateInstantId(),
-            pageIndex: currentPageIndex,
-            boundingBox: new Nutrient.Geometry.Rect({
-              left: centerLeft,
-              top: topMargin,
-              width: fieldWidth,
-              height: fieldHeight
-            }),
-            formFieldName: fieldName,
-            borderColor: Nutrient.Color.BLUE,
-            borderWidth: 2,
-            backgroundColor: new Nutrient.Color({ r: 240, g: 248, b: 255 }),
-            fontSize: 24,
-          });
-
-          const formField = new Nutrient.FormFields.TextFormField({
-            name: fieldName,
-            annotationIds: Nutrient.Immutable.List([widget.id])
-          });
-
-          await instance.create([widget, formField]);
-
-          console.log(`✅ Header field "${fieldName}" added - type in it to see real-time logging!`);
-
-          await new Promise(resolve => setTimeout(resolve, 100));
-
-          const rect = new Nutrient.Geometry.Rect({
-            left: centerLeft,
-            top: topMargin,
-            width: fieldWidth,
-            height: fieldHeight
-          });
-
-          try {
-            if (typeof instance.jumpToRect === "function") {
-              await instance.jumpToRect(currentPageIndex, rect);
-            } else if (typeof instance.ensureVisible === "function") {
-              await instance.ensureVisible(rect, currentPageIndex, {
-                position: 'center',
-                padding: 50
-              });
-            }
-          } catch (e) {
-            console.warn("Could not center viewport on new header:", e);
-          }
-
-          await new Promise(resolve => setTimeout(resolve, 200));
-
-          if (typeof instance.setSelectedAnnotation === "function") {
-            await instance.setSelectedAnnotation(widget);
-          } else if (typeof instance.select === "function") {
-            instance.select(widget);
-          }
-
-          setTimeout(() => deactivateFormCreatorMode(instance), 500);
-        } catch (err) {
-          console.error("Failed to add header:", err);
-          alert(`Failed to add header: ${err instanceof Error ? err.message : "Unknown error"}`);
         }
       },
 
@@ -644,8 +486,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             console.warn("Widget not found for form field:", formField.name);
             return;
           }
-
-          console.log(`Navigating to form field "${field.name}" on page ${actualPageIndex + 1}`);
 
           instance.setViewState((vs: any) => vs.set("currentPageIndex", actualPageIndex));
           await new Promise(resolve => setTimeout(resolve, 300));

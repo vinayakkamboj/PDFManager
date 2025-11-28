@@ -1,6 +1,6 @@
-// PDFSidebar.tsx - Form Fields with Form Creator Mode
+// PDFSidebar.tsx - Simplified (No Header Button)
 import { useState, useRef } from "react";
-import { Upload, FileText, ChevronRight, ChevronLeft, Square, X, Type, Heading } from "lucide-react";
+import { Upload, FileText, ChevronRight, ChevronLeft, Square, X, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -18,7 +18,6 @@ interface PDFSidebarProps {
   isLoading: boolean;
   onFileUpload: (file: File) => void;
   onAddFormField: () => void;
-  onAddHeader: () => void;
   onFormFieldSelect: (formField: any, index: number) => void;
   onNextFormField: () => void;
   onPreviousFormField: () => void;
@@ -32,7 +31,6 @@ const PDFSidebar = ({
   isLoading,
   onFileUpload,
   onAddFormField,
-  onAddHeader,
   onFormFieldSelect,
   onNextFormField,
   onPreviousFormField,
@@ -136,13 +134,12 @@ const PDFSidebar = ({
 
         <Separator />
 
-        {/* Add Form Field buttons */}
+        {/* Add Form Field button */}
         <div className="p-4 shrink-0 space-y-2">
           {!isCollapsed && (
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Add Fields</h3>
           )}
           
-          {/* Main Add Text Field button */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -160,42 +157,6 @@ const PDFSidebar = ({
             </TooltipTrigger>
             {isCollapsed && <TooltipContent side="right">Add a text field to the PDF</TooltipContent>}
           </Tooltip>
-
-          {/* Sub-button: Add Header */}
-          {!isCollapsed && (
-            <div className="pl-4 border-l-2 border-muted ml-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onAddHeader}
-                    className="w-full justify-start text-xs hover:bg-primary/10 hover:text-foreground"
-                  >
-                    <Heading className="h-3.5 w-3.5 mr-2" />
-                    Add Header
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">Add a large header text field</TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-
-          {isCollapsed && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onAddHeader}
-                  className="hover:bg-primary/10"
-                >
-                  <Heading className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Add Header</TooltipContent>
-            </Tooltip>
-          )}
         </div>
 
         <Separator />
