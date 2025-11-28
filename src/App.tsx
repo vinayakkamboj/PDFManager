@@ -7,6 +7,7 @@ import Layout from "./pages/Layout";
 import Home from "./pages/Home";
 import Explore from "./pages/Explore";
 import NotFound from "./pages/NotFound";
+import DwsViewer from "./pages/DwsViewer";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ const App = () => (
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
             <Route path="/explore" element={<Explore />} />
+            <Route path="/viewer" element={<DwsViewer />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
