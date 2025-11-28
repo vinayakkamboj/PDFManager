@@ -1,15 +1,14 @@
-// src/pages/Explore.tsx - UNIFIED VERSION - Single Upload
+// src/pages/Explore.tsx - UNIFIED VERSION - No OCR
 import { useState, useRef, useEffect } from "react";
 import PDFSidebar from "@/components/PDFSidebar";
 import PDFViewer, { PDFViewerHandle } from "@/components/PDFViewer";
-import { uploadDocument, performOCR } from "@/lib/api";
+import { uploadDocument } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const Explore = () => {
   const [formFields, setFormFields] = useState<any[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isOCRLoading, setIsOCRLoading] = useState(false);
   const [currentFormFieldIndex, setCurrentFormFieldIndex] = useState(0);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
   const viewerRef = useRef<PDFViewerHandle>(null);
@@ -24,7 +23,7 @@ const Explore = () => {
       
       toast({
         title: "Uploading...",
-        description: "Processing PDF for viewing and OCR",
+        description: "Processing PDF document, please wait.",
       });
       
       console.log('🚀 Starting upload for:', file.name);
@@ -52,7 +51,7 @@ const Explore = () => {
       
       toast({
         title: "Success!",
-        description: "Document loaded. OCR is now available!",
+        description: "Document loaded successfully!",
       });
       
     } catch (err) {
@@ -77,64 +76,6 @@ const Explore = () => {
       });
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handlePerformOCR = async () => {
-    if (!currentDocumentId || !viewerRef.current) {
-      toast({
-        title: "OCR not available",
-        description: "Please upload a document first",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      setIsOCRLoading(true);
-      
-      toast({
-        title: "Performing OCR...",
-        description: "This may take a moment",
-      });
-      
-      const result = await performOCR(currentDocumentId);
-      
-      if (!result.pdfData || !result.documentId) {
-        throw new Error('Invalid OCR response');
-      }
-      
-      // Load the OCR'd PDF
-      await viewerRef.current.loadDocumentFromBase64(result.pdfData, fileName);
-      
-      // Update document ID
-      setCurrentDocumentId(result.documentId);
-      
-      toast({
-        title: "OCR Complete!",
-        description: "Text extracted and document reloaded",
-      });
-      
-    } catch (err) {
-      console.error("OCR failed:", err);
-      
-      let errorMessage = "Failed to perform OCR";
-      
-      if (err instanceof Error) {
-        if (err.message.includes('not configured')) {
-          errorMessage = "OCR requires Processor API key. Add NUTRIENT_DWS_PROCESSOR_API_KEY to backend .env";
-        } else {
-          errorMessage = err.message;
-        }
-      }
-      
-      toast({
-        title: "OCR failed",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setIsOCRLoading(false);
     }
   };
 
@@ -242,8 +183,6 @@ const Explore = () => {
         onPreviousFormField={handlePreviousFormField}
         onDeleteFormField={handleDeleteFormField}
         currentFormFieldIndex={currentFormFieldIndex}
-        onPerformOCR={handlePerformOCR}
-        isOCRLoading={isOCRLoading}
       />
 
       <main className="flex-1 bg-muted/30 relative">

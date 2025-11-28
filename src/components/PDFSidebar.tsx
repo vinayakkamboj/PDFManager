@@ -1,6 +1,6 @@
 // PDFSidebar.tsx - UNIFIED VERSION - Single Upload Button
 import { useState, useRef } from "react";
-import { Upload, FileText, ChevronRight, ChevronLeft, Square, X, Type, ScanText } from "lucide-react";
+import { Upload, FileText, ChevronRight, ChevronLeft, Square, X, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,8 +23,6 @@ interface PDFSidebarProps {
   onPreviousFormField: () => void;
   onDeleteFormField: (formField: any, index: number) => void;
   currentFormFieldIndex: number;
-  onPerformOCR?: () => void;
-  isOCRLoading?: boolean;
 }
 
 const PDFSidebar = ({
@@ -38,8 +36,6 @@ const PDFSidebar = ({
   onPreviousFormField,
   onDeleteFormField,
   currentFormFieldIndex,
-  onPerformOCR,
-  isOCRLoading = false,
 }: PDFSidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -166,47 +162,6 @@ const PDFSidebar = ({
         </div>
 
         <Separator />
-
-        {/* OCR Button */}
-        {onPerformOCR && (
-          <>
-            <div className="px-4 pb-4 shrink-0 space-y-2">
-              {!isCollapsed && (
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                  Document Processing
-                </h3>
-              )}
-              
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size={isCollapsed ? "icon" : "default"}
-                    onClick={onPerformOCR}
-                    disabled={isOCRLoading || !fileName}
-                    className={cn(
-                      "hover:bg-primary/10 hover:border-primary/50 hover:text-foreground", 
-                      !isCollapsed && "w-full justify-start"
-                    )}
-                  >
-                    <ScanText className="h-4 w-4" />
-                    {!isCollapsed && (
-                      <span className="ml-2">
-                        {isOCRLoading ? "Processing..." : "Perform OCR"}
-                      </span>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                {isCollapsed && (
-                  <TooltipContent side="right">
-                    Perform OCR on document
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            </div>
-            <Separator />
-          </>
-        )}
 
         {/* Form Fields list */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 min-h-0 flex flex-col">
