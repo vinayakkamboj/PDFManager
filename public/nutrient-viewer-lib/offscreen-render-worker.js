@@ -1,5 +1,5 @@
 /*!
- * Nutrient Web SDK 1.8.0 (https://www.nutrient.io/sdk/web)
+ * Nutrient Web SDK 1.9.1 (https://www.nutrient.io/sdk/web)
  *
  * Copyright (c) 2016-2025 PSPDFKit GmbH. All rights reserved.
  *

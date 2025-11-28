@@ -1,4 +1,4 @@
-// PDFViewer.tsx - Clean Console Logging (Field, Value, Type only)
+// src/components/PDFViewer.tsx - UNIFIED VERSION
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from "react";
 
 interface PDFViewerProps {
@@ -9,6 +9,7 @@ interface PDFViewerProps {
 
 export interface PDFViewerHandle {
   loadDocument: (file: File) => Promise<void>;
+  loadDocumentFromBase64: (base64Data: string, fileName: string) => Promise<void>;
   navigateToPage: (pageIndex: number) => void;
   getInstance: () => any;
   unloadDocument: () => Promise<void>;
@@ -25,49 +26,11 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const instanceRef = useRef<any>(null);
     const [isInitialized, setIsInitialized] = useState(false);
 
-    /**
-     * Activate Form Creator Mode
-     */
-    const activateFormCreatorMode = async (instance: any) => {
-      try {
-        const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-        
-        instance.setViewState((viewState: any) => 
-          viewState.set("interactionMode", Nutrient.InteractionMode.FORM_CREATOR)
-        );
-        
-        return true;
-      } catch (err) {
-        console.error("Failed to activate Form Creator mode:", err);
-        return false;
-      }
-    };
-
-    /**
-     * Deactivate Form Creator Mode
-     */
-    const deactivateFormCreatorMode = async (instance: any) => {
-      try {
-        const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-        
-        instance.setViewState((viewState: any) => 
-          viewState.set("interactionMode", null)
-        );
-        
-        return true;
-      } catch (err) {
-        return false;
-      }
-    };
-
-    /**
-     * Collect all form fields from the document
-     */
     const collectFormFields = async (instance: any): Promise<any[]> => {
       const fields: any[] = [];
       
       try {
-        const Nutrient = (await import("@nutrient-sdk/viewer")).default;
+        const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
         const formFields = await instance.getFormFields();
         
         if (!formFields) return fields;
@@ -77,24 +40,21 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
         for (const field of fieldsArray) {
           const isSignatureField = 
-            field instanceof Nutrient.FormFields?.SignatureFormField ||
+            field instanceof NutrientViewer.FormFields?.SignatureFormField ||
             field?.type === "signature" ||
-            field?.fieldType === "signature" ||
-            (field?.constructor?.name || "").toLowerCase().includes("signature");
+            field?.fieldType === "signature";
 
           if (isSignatureField) continue;
 
           let fieldType = "text";
-          if (field instanceof Nutrient.FormFields?.CheckBoxFormField) {
+          if (field instanceof NutrientViewer.FormFields?.CheckBoxFormField) {
             fieldType = "checkbox";
-          } else if (field instanceof Nutrient.FormFields?.RadioButtonFormField) {
+          } else if (field instanceof NutrientViewer.FormFields?.RadioButtonFormField) {
             fieldType = "radio";
-          } else if (field instanceof Nutrient.FormFields?.ComboBoxFormField) {
+          } else if (field instanceof NutrientViewer.FormFields?.ComboBoxFormField) {
             fieldType = "combobox";
-          } else if (field instanceof Nutrient.FormFields?.ListBoxFormField) {
+          } else if (field instanceof NutrientViewer.FormFields?.ListBoxFormField) {
             fieldType = "listbox";
-          } else if (field instanceof Nutrient.FormFields?.TextFormField) {
-            fieldType = "text";
           }
 
           let widget = null;
@@ -106,7 +66,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             
             const foundWidget = annotationsArray.find(
               (ann: any) =>
-                ann instanceof Nutrient.Annotations.WidgetAnnotation &&
+                ann instanceof NutrientViewer.Annotations.WidgetAnnotation &&
                 ann.formFieldName === field.name
             );
             
@@ -135,9 +95,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return fields;
     };
 
-    /**
-     * Attach event listeners for form field changes
-     */
     const attachFormFieldEvents = (instance: any, refreshFormFn: () => Promise<void>) => {
       const eventTypes = ["formFields.create", "formFields.update", "formFields.delete"];
       
@@ -145,7 +102,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         try {
           await refreshFormFn();
         } catch (e) {
-          // console.warn("Refresh form fields failed:", e);
+          // Silent
         }
       };
 
@@ -166,27 +123,20 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       };
     };
 
-    /**
-     * CLEAN CONSOLE LOGGING - Only Field, Input Value, Type
-     */
     const attachFormValueChangeListener = (instance: any) => {
       const formFieldValuesUpdateHandler = (formFieldValues: any) => {
         const valuesArray = formFieldValues?.toArray?.() ?? Array.from(formFieldValues || []);
         
         valuesArray.forEach((fieldValue: any) => {
           const value = fieldValue?.toJS?.() ?? fieldValue;
-          
-          console.log("Field:", value.name);
-          console.log("Input Value:", value.value ?? "(empty)");
-          console.log("Type:", value.type ?? "unknown");
+          console.log("Field:", value.name, "Value:", value.value ?? "(empty)");
         });
       };
 
       try {
         instance.addEventListener("formFieldValues.update", formFieldValuesUpdateHandler);
-        // console.log("✅ Real-time form value listener attached!");
       } catch (e) {
-        console.error("Failed to attach formFieldValues.update listener:", e);
+        console.error("Failed to attach form value listener:", e);
       }
 
       return () => {
@@ -196,33 +146,32 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       };
     };
 
-    /**
-     * Load a new PDF document
-     */
     const loadNewDocument = async (arrayBuffer: ArrayBuffer, fileName: string) => {
       const container = containerRef.current;
       if (!container) throw new Error("Viewer container missing");
 
-      const Nutrient = (await import("@nutrient-sdk/viewer")).default;
+      const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
 
       if (instanceRef.current) {
         try {
-          await Nutrient.unload(container);
+          await NutrientViewer.unload(container);
         } catch (e) {
-          console.warn("Error unloading previous instance:", e);
+          console.warn("Error unloading:", e);
         }
         instanceRef.current = null;
       }
 
-      const instance = await Nutrient.load({
+      console.log('📄 Loading document locally, size:', arrayBuffer.byteLength);
+
+      const instance = await NutrientViewer.load({
         container,
         document: arrayBuffer,
         baseUrl: `${window.location.protocol}//${window.location.host}/`,
-        initialViewState: new Nutrient.ViewState({
+        initialViewState: new NutrientViewer.ViewState({
           formDesignMode: true
         }),
         toolbarItems: [
-          ...Nutrient.defaultToolbarItems,
+          ...NutrientViewer.defaultToolbarItems,
           { type: "form-creator" }
         ]
       });
@@ -233,20 +182,16 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       onFormFieldsLoad?.(formFields);
       onDocumentLoad?.(fileName);
 
-      attachFormFieldEvents(
-        instance,
-        async () => {
-          const updated = await collectFormFields(instance);
-          onFormFieldsLoad?.(updated);
-        }
-      );
+      attachFormFieldEvents(instance, async () => {
+        const updated = await collectFormFields(instance);
+        onFormFieldsLoad?.(updated);
+      });
 
       attachFormValueChangeListener(instance);
+
+      console.log('✅ Document loaded successfully');
     };
 
-    /**
-     * Initialize viewer on mount
-     */
     useEffect(() => {
       let mounted = true;
       let detachFormFields: (() => void) | null = null;
@@ -257,28 +202,28 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         if (!container) return;
 
         try {
-          const Nutrient = (await import("@nutrient-sdk/viewer")).default;
+          const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
 
           try {
-            await Nutrient.unload(container);
+            await NutrientViewer.unload(container);
           } catch {}
 
-          const instance = await Nutrient.load({
+          const instance = await NutrientViewer.load({
             container,
             document: "https://www.nutrient.io/downloads/nutrient-web-demo.pdf",
             baseUrl: `${window.location.protocol}//${window.location.host}/`,
-            initialViewState: new Nutrient.ViewState({
+            initialViewState: new NutrientViewer.ViewState({
               formDesignMode: true
             }),
             toolbarItems: [
-              ...Nutrient.defaultToolbarItems,
+              ...NutrientViewer.defaultToolbarItems,
               { type: "form-creator" }
             ]
           });
 
           if (!mounted) {
             try {
-              await Nutrient.unload(container);
+              await NutrientViewer.unload(container);
             } catch {}
             return;
           }
@@ -290,19 +235,14 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           onFormFieldsLoad?.(formFields);
           onDocumentLoad?.("nutrient-web-demo.pdf");
 
-          detachFormFields = attachFormFieldEvents(
-            instance,
-            async () => {
-              const updated = await collectFormFields(instance);
-              onFormFieldsLoad?.(updated);
-            }
-          );
+          detachFormFields = attachFormFieldEvents(instance, async () => {
+            const updated = await collectFormFields(instance);
+            onFormFieldsLoad?.(updated);
+          });
 
           detachFormValues = attachFormValueChangeListener(instance);
-
-          // console.log("✅ PDF Viewer initialized with real-time logging");
         } catch (err) {
-          console.error("Viewer initialization failed:", err);
+          console.error("Viewer init failed:", err);
         }
       })();
 
@@ -315,21 +255,33 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           const c = containerRef.current;
           if (!c) return;
           try {
-            const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-            await Nutrient.unload(c);
+            const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
+            await NutrientViewer.unload(c);
           } catch {}
         })();
       };
     }, []);
 
-    /**
-     * Expose methods via ref
-     */
     useImperativeHandle(ref, () => ({
       loadDocument: async (file: File) => {
         if (!isInitialized) throw new Error("Viewer not ready");
         const buffer = await file.arrayBuffer();
         await loadNewDocument(buffer, file.name);
+      },
+
+      loadDocumentFromBase64: async (base64Data: string, fileName: string) => {
+        if (!isInitialized) throw new Error("Viewer not ready");
+        
+        console.log('📦 Converting base64 to ArrayBuffer...');
+        // Convert base64 to ArrayBuffer
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const arrayBuffer = bytes.buffer;
+        
+        await loadNewDocument(arrayBuffer, fileName);
       },
 
       navigateToPage: (pageIndex: number) => {
@@ -347,8 +299,8 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         const container = containerRef.current;
         if (!container) return;
         try {
-          const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-          await Nutrient.unload(container);
+          const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
+          await NutrientViewer.unload(container);
         } catch (err) {
           console.warn("unloadDocument failed:", err);
         } finally {
@@ -357,21 +309,14 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       },
 
       addFormField: async () => {
-        if (!instanceRef.current) {
-          console.error("Viewer instance not available");
-          return;
-        }
-
+        if (!instanceRef.current) return;
         const instance = instanceRef.current;
 
         try {
-          const Nutrient = (await import("@nutrient-sdk/viewer")).default;
-
-          await activateFormCreatorMode(instance);
+          const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
 
           const viewState = instance.viewState;
           const currentPageIndex = viewState?.currentPageIndex ?? 0;
-
           const pageInfo = instance.pageInfoForIndex(currentPageIndex);
           const pageWidth = pageInfo?.width ?? 612;
           const pageHeight = pageInfo?.height ?? 792;
@@ -383,64 +328,29 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
           const fieldName = `text_field_${Date.now()}_${__formFieldCounter++}`;
 
-          const widget = new Nutrient.Annotations.WidgetAnnotation({
-            id: Nutrient.generateInstantId(),
+          const widget = new NutrientViewer.Annotations.WidgetAnnotation({
+            id: NutrientViewer.generateInstantId(),
             pageIndex: currentPageIndex,
-            boundingBox: new Nutrient.Geometry.Rect({
+            boundingBox: new NutrientViewer.Geometry.Rect({
               left: centerLeft,
               top: centerTop,
               width: fieldWidth,
               height: fieldHeight
             }),
             formFieldName: fieldName,
-            borderColor: Nutrient.Color.BLACK,
+            borderColor: NutrientViewer.Color.BLACK,
             borderWidth: 1,
-            backgroundColor: Nutrient.Color.WHITE,
+            backgroundColor: NutrientViewer.Color.WHITE,
           });
 
-          const formField = new Nutrient.FormFields.TextFormField({
+          const formField = new NutrientViewer.FormFields.TextFormField({
             name: fieldName,
-            annotationIds: Nutrient.Immutable.List([widget.id])
+            annotationIds: NutrientViewer.Immutable.List([widget.id])
           });
 
           await instance.create([widget, formField]);
-
-          console.log(`Text field "${fieldName}" added`);
-
-          await new Promise(resolve => setTimeout(resolve, 100));
-
-          const rect = new Nutrient.Geometry.Rect({
-            left: centerLeft,
-            top: centerTop,
-            width: fieldWidth,
-            height: fieldHeight
-          });
-
-          try {
-            if (typeof instance.jumpToRect === "function") {
-              await instance.jumpToRect(currentPageIndex, rect);
-            } else if (typeof instance.ensureVisible === "function") {
-              await instance.ensureVisible(rect, currentPageIndex, {
-                position: 'center',
-                padding: 50
-              });
-            }
-          } catch (e) {
-            console.warn("Could not center viewport on new field:", e);
-          }
-
-          await new Promise(resolve => setTimeout(resolve, 200));
-
-          if (typeof instance.setSelectedAnnotation === "function") {
-            await instance.setSelectedAnnotation(widget);
-          } else if (typeof instance.select === "function") {
-            instance.select(widget);
-          }
-
-          setTimeout(() => deactivateFormCreatorMode(instance), 500);
         } catch (err) {
           console.error("Failed to add form field:", err);
-          alert(`Failed to add form field: ${err instanceof Error ? err.message : "Unknown error"}`);
         }
       },
 
@@ -449,17 +359,13 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         const instance = instanceRef.current;
         
         try {
-          const Nutrient = (await import("@nutrient-sdk/viewer")).default;
+          const NutrientViewer = (await import("@nutrient-sdk/viewer")).default;
           
           const formFields = await instance.getFormFields();
           const formFieldsArray = formFields?.toArray?.() ?? Array.from(formFields || []);
           
           const field = formFieldsArray.find((f: any) => f.name === formField.name);
-
-          if (!field) {
-            console.warn("Form field not found:", formField.name);
-            return;
-          }
+          if (!field) return;
 
           let widget = null;
           let actualPageIndex = 0;
@@ -471,7 +377,7 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             
             const foundWidget = annotationsArray.find(
               (ann: any) =>
-                ann instanceof Nutrient.Annotations.WidgetAnnotation &&
+                ann instanceof NutrientViewer.Annotations.WidgetAnnotation &&
                 ann.formFieldName === field.name
             );
             
@@ -482,28 +388,23 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             }
           }
 
-          if (!widget) {
-            console.warn("Widget not found for form field:", formField.name);
-            return;
-          }
+          if (!widget) return;
 
           instance.setViewState((vs: any) => vs.set("currentPageIndex", actualPageIndex));
           await new Promise(resolve => setTimeout(resolve, 300));
 
           if (widget.boundingBox) {
             try {
-              const rect = new Nutrient.Geometry.Rect(widget.boundingBox);
+              const rect = new NutrientViewer.Geometry.Rect(widget.boundingBox);
               
               if (typeof instance.ensureVisible === "function") {
                 await instance.ensureVisible(rect, actualPageIndex, { 
                   position: 'center',
                   padding: 50 
                 });
-              } else if (typeof instance.jumpToRect === "function") {
-                await instance.jumpToRect(actualPageIndex, widget.boundingBox);
               }
             } catch (e) {
-              console.warn("Could not center form field:", e);
+              console.warn("Could not center:", e);
             }
           }
 
@@ -511,8 +412,6 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
           if (typeof instance.setSelectedAnnotation === "function") {
             await instance.setSelectedAnnotation(widget);
-          } else if (typeof instance.select === "function") {
-            instance.select(widget);
           }
         } catch (err) {
           console.error("focusFormField error:", err);
@@ -532,25 +431,30 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             await instance.delete(formField.widget);
           }
 
-          if (formField.sdk?.annotationIds) {
-            const annotationIds = formField.sdk.annotationIds?.toArray?.() ?? 
-                                  Array.from(formField.sdk.annotationIds || []);
-
-            for (const annotationId of annotationIds) {
+          if (formField.sdk?.name) {
+            const totalPages = instance.totalPageCount ?? 0;
+            
+            for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
               try {
-                const annotation = await instance.getAnnotation(annotationId);
-                if (annotation) {
-                  await instance.delete(annotation);
+                const pageAnnotations = await instance.getAnnotations(pageIndex);
+                const annotationsArray = pageAnnotations?.toArray?.() ?? Array.from(pageAnnotations || []);
+                
+                for (const annotation of annotationsArray) {
+                  if (annotation.formFieldName === formField.sdk.name) {
+                    await instance.delete(annotation);
+                  }
                 }
               } catch (e) {
-                console.warn(`Failed to delete annotation ${annotationId}:`, e);
+                console.warn(`Failed to delete annotations on page ${pageIndex}:`, e);
               }
             }
           }
 
-          await instance.delete(formField.sdk);
+          if (formField.sdk) {
+            await instance.delete(formField.sdk);
+          }
 
-          console.log("Form field deleted successfully");
+          console.log("✅ Form field deleted successfully");
         } catch (err) {
           console.error("Failed to delete form field:", err);
           throw err;
